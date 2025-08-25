@@ -1,4 +1,4 @@
-// queryInterface.ts
+// src/queryInterface.ts
 import { BigQuery } from "@google-cloud/bigquery";
 import { BigQueryORM } from "./bigQueryORM";
 import { DataType } from "./dataTypes";
@@ -8,6 +8,10 @@ export class QueryInterface {
   constructor(private orm: BigQueryORM) {}
 
   private dataTypeToString(type: DataType): string {
+    this.orm.logger.info(
+      "[QueryInterface:dataTypeToString] Converting data type to string",
+      { type }
+    );
     let base = "";
     if (type.type === "STRUCT") {
       base = `STRUCT<${Object.entries(type.fields || {})
@@ -22,7 +26,6 @@ export class QueryInterface {
     if (type.mode === "REPEATED") {
       return `ARRAY<${base}>`;
     }
-
     return base;
   }
 
@@ -31,31 +34,30 @@ export class QueryInterface {
     attributes: Record<string, DataType>,
     options: { partitionBy?: string; clusterBy?: string[] } = {}
   ): Promise<void> {
+    this.orm.logger.info("[QueryInterface:createTable] Starting createTable", {
+      tableName,
+      attributes: Object.keys(attributes),
+      options,
+    });
     if (this.orm.config.freeTierMode) {
-      console.warn(
-        "Free tier mode: Table creation counts toward 10GB storage limit."
+      this.orm.logger.warn(
+        "[QueryInterface:createTable] Free tier mode: Table creation counts toward 10GB storage limit."
       );
     }
     const dataset = this.orm.bigquery.dataset(this.orm.config.dataset);
     const [dsExists] = await dataset.exists();
     if (!dsExists) {
-      try {
-        await dataset.create();
-        if (this.orm.config.logging)
-          console.log(`Created dataset ${this.orm.config.dataset}`);
-      } catch (err: any) {
-        console.error(
-          `Failed to create dataset ${this.orm.config.dataset}:`,
-          err.message
-        );
-        throw err;
-      }
+      await dataset.create();
+      this.orm.logger.info(
+        `[QueryInterface:createTable] Created dataset ${this.orm.config.dataset}`
+      );
     }
     const table = dataset.table(tableName);
     const [tExists] = await table.exists();
     if (tExists) {
-      if (this.orm.config.logging)
-        console.log(`Table ${tableName} already exists, skipping creation`);
+      this.orm.logger.info(
+        `[QueryInterface:createTable] Table ${tableName} already exists, skipping creation`
+      );
       return;
     }
     const schema = Object.entries(attributes).map(([name, type]) =>
@@ -71,19 +73,19 @@ export class QueryInterface {
     if (options.clusterBy) {
       createOptions.clustering = { fields: options.clusterBy };
     }
-    try {
-      await table.create(createOptions);
-      if (this.orm.config.logging) console.log(`Created table ${tableName}`);
-    } catch (err: any) {
-      console.error(`Failed to create table ${tableName}:`, err.message);
-      throw err;
-    }
+    await table.create(createOptions);
+    this.orm.logger.info(
+      `[QueryInterface:createTable] Created table ${tableName}`
+    );
   }
 
   async dropTable(tableName: string): Promise<void> {
+    this.orm.logger.info("[QueryInterface:dropTable] Starting dropTable", {
+      tableName,
+    });
     if (this.orm.config.freeTierMode) {
-      console.warn(
-        "Free tier mode: Table deletion counts toward storage changes."
+      this.orm.logger.warn(
+        "[QueryInterface:dropTable] Free tier mode: Table deletion counts toward storage changes."
       );
     }
     const table = this.orm.bigquery
@@ -91,17 +93,15 @@ export class QueryInterface {
       .table(tableName);
     const [exists] = await table.exists();
     if (!exists) {
-      if (this.orm.config.logging)
-        console.log(`Table ${tableName} does not exist, skipping deletion`);
+      this.orm.logger.info(
+        `[QueryInterface:dropTable] Table ${tableName} does not exist, skipping deletion`
+      );
       return;
     }
-    try {
-      await table.delete();
-      if (this.orm.config.logging) console.log(`Deleted table ${tableName}`);
-    } catch (err: any) {
-      console.error(`Failed to delete table ${tableName}:`, err.message);
-      throw err;
-    }
+    await table.delete();
+    this.orm.logger.info(
+      `[QueryInterface:dropTable] Deleted table ${tableName}`
+    );
   }
 
   async addColumn(
@@ -109,45 +109,42 @@ export class QueryInterface {
     columnName: string,
     type: DataType
   ): Promise<void> {
+    this.orm.logger.info("[QueryInterface:addColumn] Starting addColumn", {
+      tableName,
+      columnName,
+      type,
+    });
     if (this.orm.config.freeTierMode) {
-      throw new Error(
-        "Free tier mode: ADD COLUMN (DML) not allowed. Enable billing at https://console.cloud.google.com/billing."
+      this.orm.logger.error(
+        "[QueryInterface:addColumn] Free tier mode: ADD COLUMN (DML) not allowed."
       );
+      throw new Error("Free tier mode: ADD COLUMN (DML) not allowed.");
     }
     const dataTypeStr = this.dataTypeToString(type);
     const notNull = type.allowNull === false ? " NOT NULL" : "";
     const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` ADD COLUMN \`${columnName}\` ${dataTypeStr}${notNull}`;
-    try {
-      await this.orm.bigquery.query(sql);
-      if (this.orm.config.logging)
-        console.log(`Added column ${columnName} to ${tableName}`);
-    } catch (err: any) {
-      console.error(
-        `Failed to add column ${columnName} to ${tableName}:`,
-        err.message
-      );
-      throw err;
-    }
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(
+      `[QueryInterface:addColumn] Added column ${columnName} to ${tableName}`
+    );
   }
 
   async removeColumn(tableName: string, columnName: string): Promise<void> {
+    this.orm.logger.info(
+      "[QueryInterface:removeColumn] Starting removeColumn",
+      { tableName, columnName }
+    );
     if (this.orm.config.freeTierMode) {
-      throw new Error(
-        "Free tier mode: DROP COLUMN (DML) not allowed. Enable billing at https://console.cloud.google.com/billing."
+      this.orm.logger.error(
+        "[QueryInterface:removeColumn] Free tier mode: DROP COLUMN (DML) not allowed."
       );
+      throw new Error("Free tier mode: DROP COLUMN (DML) not allowed.");
     }
     const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` DROP COLUMN IF EXISTS \`${columnName}\``;
-    try {
-      await this.orm.bigquery.query(sql);
-      if (this.orm.config.logging)
-        console.log(`Removed column ${columnName} from ${tableName}`);
-    } catch (err: any) {
-      console.error(
-        `Failed to remove column ${columnName} from ${tableName}:`,
-        err.message
-      );
-      throw err;
-    }
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(
+      `[QueryInterface:removeColumn] Removed column ${columnName} from ${tableName}`
+    );
   }
 
   async renameColumn(
@@ -155,25 +152,21 @@ export class QueryInterface {
     oldColumnName: string,
     newColumnName: string
   ): Promise<void> {
+    this.orm.logger.info(
+      "[QueryInterface:renameColumn] Starting renameColumn",
+      { tableName, oldColumnName, newColumnName }
+    );
     if (this.orm.config.freeTierMode) {
-      throw new Error(
-        "Free tier mode: RENAME COLUMN (DML) not allowed. Enable billing at https://console.cloud.google.com/billing."
+      this.orm.logger.error(
+        "[QueryInterface:renameColumn] Free tier mode: RENAME COLUMN (DML) not allowed."
       );
+      throw new Error("Free tier mode: RENAME COLUMN (DML) not allowed.");
     }
     const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` RENAME COLUMN \`${oldColumnName}\` TO \`${newColumnName}\``;
-    try {
-      await this.orm.bigquery.query(sql);
-      if (this.orm.config.logging)
-        console.log(
-          `Renamed column ${oldColumnName} to ${newColumnName} in ${tableName}`
-        );
-    } catch (err: any) {
-      console.error(
-        `Failed to rename column ${oldColumnName} to ${newColumnName} in ${tableName}:`,
-        err.message
-      );
-      throw err;
-    }
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(
+      `[QueryInterface:renameColumn] Renamed column ${oldColumnName} to ${newColumnName} in ${tableName}`
+    );
   }
 
   async changeColumn(
@@ -181,64 +174,83 @@ export class QueryInterface {
     columnName: string,
     type: DataType
   ): Promise<void> {
+    this.orm.logger.info(
+      "[QueryInterface:changeColumn] Starting changeColumn",
+      { tableName, columnName, type }
+    );
     if (this.orm.config.freeTierMode) {
-      throw new Error(
-        "Free tier mode: ALTER COLUMN (DML) not allowed. Enable billing at https://console.cloud.google.com/billing."
+      this.orm.logger.error(
+        "[QueryInterface:changeColumn] Free tier mode: ALTER COLUMN (DML) not allowed."
       );
+      throw new Error("Free tier mode: ALTER COLUMN (DML) not allowed.");
     }
-    try {
-      const dataTypeStr = this.dataTypeToString(type);
-      const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` ALTER COLUMN \`${columnName}\` SET DATA TYPE ${dataTypeStr}`;
-      await this.orm.bigquery.query(sql);
-      if (this.orm.config.logging)
-        console.log(`Changed column ${columnName} type in ${tableName}`);
-    } catch (err: any) {
-      console.warn(
-        "Type change not supported directly; consider manual migration with temp table."
-      );
-      throw err;
-    }
+    const dataTypeStr = this.dataTypeToString(type);
+    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` ALTER COLUMN \`${columnName}\` SET DATA TYPE ${dataTypeStr}`;
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(
+      `[QueryInterface:changeColumn] Changed column ${columnName} type in ${tableName}`
+    );
   }
 
   async addPartition(tableName: string, partitionBy: string): Promise<void> {
-    console.warn("Partitioning requires table recreation.");
+    this.orm.logger.info(
+      "[QueryInterface:addPartition] Starting addPartition",
+      { tableName, partitionBy }
+    );
+    this.orm.logger.warn(
+      "[QueryInterface:addPartition] Partitioning requires table recreation."
+    );
+    if (this.orm.config.freeTierMode) {
+      this.orm.logger.error(
+        "[QueryInterface:addPartition] Free tier mode: Partition changes not supported."
+      );
+      throw new Error("Free tier mode: Partition changes not supported.");
+    }
+    // Note: BigQuery requires table recreation for partitioning changes
+    this.orm.logger.info(
+      "[QueryInterface:addPartition] Partitioning not directly supported; manual table recreation required."
+    );
   }
 
   async addClustering(tableName: string, clusterBy: string[]): Promise<void> {
+    this.orm.logger.info(
+      "[QueryInterface:addClustering] Starting addClustering",
+      { tableName, clusterBy }
+    );
     if (this.orm.config.freeTierMode) {
-      console.warn("Free tier mode: Clustering may incur query costs.");
+      this.orm.logger.warn(
+        "[QueryInterface:addClustering] Free tier mode: Clustering may incur query costs."
+      );
     }
     const sql = `ALTER TABLE \`${this.orm.config.projectId}.${
       this.orm.config.dataset
     }.${tableName}\` SET OPTIONS (clustering_fields = '${JSON.stringify(
       clusterBy
     )}')`;
-    try {
-      await this.orm.bigquery.query(sql);
-      if (this.orm.config.logging)
-        console.log(`Added clustering to ${tableName}`);
-    } catch (err: any) {
-      console.error(`Failed to add clustering to ${tableName}:`, err.message);
-      throw err;
-    }
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(
+      `[QueryInterface:addClustering] Added clustering to ${tableName}`
+    );
   }
 
   async query(sql: string, params?: any): Promise<any> {
+    this.orm.logger.info("[QueryInterface:query] Starting query execution", {
+      sql,
+      params,
+    });
     if (
       this.orm.config.freeTierMode &&
       sql.trim().toUpperCase().startsWith("INSERT")
     ) {
-      throw new Error(
-        "Free tier mode: INSERT queries not allowed. Enable billing at https://console.cloud.google.com/billing."
+      this.orm.logger.error(
+        "[QueryInterface:query] Free tier mode: INSERT queries not allowed."
       );
+      throw new Error("Free tier mode: INSERT queries not allowed.");
     }
-    try {
-      const result = await this.orm.bigquery.query({ query: sql, params });
-      if (this.orm.config.logging) console.log(`Executed query: ${sql}`);
-      return result;
-    } catch (err: any) {
-      console.error("Query failed:", err.message);
-      throw err;
-    }
+    const result = await this.orm.bigquery.query({ query: sql, params });
+    this.orm.logger.info(
+      `[QueryInterface:query] Executed query successfully for ${this.orm.config.dataset}`
+    );
+    return result;
   }
 }

@@ -1,4 +1,3 @@
-// utils.ts
 import { DataType } from "./dataTypes";
 import { Op, Operator } from "./op";
 

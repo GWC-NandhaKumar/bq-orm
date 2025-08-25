@@ -1,120 +1,157 @@
-# BigQuery ORM (`bg-orm`)
+# BigQuery ORM (`bq-orm`)
 
-`bg-orm` is a comprehensive, Sequelize-inspired Object-Relational Mapping (ORM) library tailored for Google BigQuery. It enables Node.js developers to interact with BigQuery databases using familiar ORM patterns, including model definitions, associations, CRUD operations, migrations, and advanced querying. The library supports BigQuery's unique features such as partitioning, clustering, structured data types (e.g., `STRUCT`, `ARRAY`, `JSON`), and free-tier limitations.
+`bq-orm` is a Sequelize-inspired Object-Relational Mapping (ORM) library for Google BigQuery, designed for Node.js developers. It provides familiar ORM patterns for model definitions, associations (relationships), CRUD operations, migrations, advanced querying (with search, sort, pagination), and support for BigQuery's unique features like partitioning, clustering, structured data types (`STRUCT`, `ARRAY`, `JSON`), geography, intervals, and free-tier limitations.
 
-This README provides an in-depth guide for developers, covering all aspects of the library based on a thorough analysis of the source code. It includes detailed explanations of data types, model methods, relationships, migration files, model files, and usage examples.
+This README is a comprehensive, developer-friendly guide, with detailed explanations, code snippets, and examples for all features. It's based on the library's source code as of August 25, 2025, and assumes TypeScript usage for type safety (though JavaScript works too). The library is TypeScript-first, with strong typing for models, migrations, queries, and more.
 
 ## Table of Contents
 
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Authentication](#authentication)
 - [Defining Models](#defining-models)
-  - [Model Initialization](#model-initialization)
-  - [Model Files Structure](#model-files-structure)
-- [All Supported Data Types](#all-supported-data-types)
-  - [Using JSON Data Type](#using-json-data-type)
-  - [Using ARRAY Data Type](#using-array-data-type)
-  - [Using STRUCT Data Type](#using-struct-data-type)
+  - [Basic Model Definition](#basic-model-definition)
+  - [Model Files and Loading](#model-files-and-loading)
+- [Supported Data Types](#supported-data-types)
+  - [Examples for Advanced Types](#examples-for-advanced-types)
 - [Relationships (Associations)](#relationships-associations)
-  - [belongsTo](#belongsto)
-  - [hasOne](#hasone)
-  - [hasMany](#hasmany)
-  - [belongsToMany](#belongstomany)
+  - [One-to-One (belongsTo, hasOne)](#one-to-one-belongsto-hasone)
+  - [One-to-Many (hasMany)](#one-to-many-hasmany)
+  - [Many-to-Many (belongsToMany)](#many-to-many-belongstomany)
 - [Model Methods](#model-methods)
-  - [Query Methods](#query-methods)
-  - [CRUD Methods](#crud-methods)
-  - [Utility Methods](#utility-methods)
-- [Query Options](#query-options)
-- [CRUD Operations](#crud-operations)
+  - [CRUD Methods (Create, Update, Destroy)](#crud-methods-create-update-destroy)
+  - [Query Methods (findAll, findOne, findByPk, count)](#query-methods-findall-findone-findbypk-count)
+  - [Utility Methods (Increment, Decrement)](#utility-methods-increment-decrement)
+- [Querying Data](#querying-data)
+  - [Where Clauses and Operators](#where-clauses-and-operators)
+  - [Searching (LIKE, IN, etc.)](#searching-like-in-etc)
+  - [Sorting (ORDER BY)](#sorting-order-by)
+  - [Pagination (LIMIT, OFFSET)](#pagination-limit-offset)
+  - [Grouping and Aggregations](#grouping-and-aggregations)
+  - [Eager Loading (Include)](#eager-loading-include)
+  - [Raw Queries](#raw-queries)
+- [CRUD Operations with Examples](#crud-operations-with-examples)
 - [Query Interface](#query-interface)
+  - [Schema Operations](#schema-operations)
+- [Creating Datasets and Tables](#creating-datasets-and-tables)
 - [Migrations](#migrations)
   - [Migration Files Structure](#migration-files-structure)
-  - [Running Migrations](#running-migrations)
-- [Free Tier Mode](#free-tier-mode)
-- [Operators (Op)](#operators-op)
-- [Syncing Schema](#syncing-schema)
+  - [Running and Reverting Migrations](#running-and-reverting-migrations)
+  - [Migration Examples](#migration-examples)
+- [Schema Syncing](#schema-syncing)
 - [Transactions](#transactions)
-- [Loading Models](#loading-models)
-- [Error Handling](#error-handling)
+- [Free Tier Mode](#free-tier-mode)
 - [Logging](#logging)
+- [Error Handling](#error-handling)
+- [Best Practices and Tips](#best-practices-and-tips)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Features
 
-- **Model Definition & Attributes**: Define models with precise control over attributes, including defaults, nullability, and primary keys.
-- **All Data Types Supported**: Comprehensive mapping to BigQuery data types, including advanced ones like `ARRAY`, `STRUCT`, `JSON`, `GEOGRAPHY`, and `INTERVAL`.
-- **Associations**: Full support for one-to-one, one-to-many, and many-to-many relationships with automatic JOIN handling and eager loading.
-- **Model Methods**: Extensive static methods for querying (e.g., `findAll`, `count`), CRUD (e.g., `create`, `update`, `destroy`), and utilities (e.g., `increment`).
-- **Migrations**: Scriptable up/down migrations for schema management, with support for free-tier in-memory tracking.
-- **Query Building**: Advanced query options for `WHERE`, `INCLUDE`, `ORDER`, `GROUP`, `LIMIT`, and more.
-- **Free Tier Compatibility**: Restricts DML operations to stay within BigQuery's free limits.
-- **TypeScript-First**: Strongly typed interfaces for models, options, and data types.
+- **TypeScript-First**: Strong typing for models, attributes, queries, migrations, and associations.
+- **Model Definitions**: Attributes with defaults, nullability, primary keys, and auto-generated fields (e.g., UUID, timestamps).
+- **Data Types**: Full BigQuery support, including `ARRAY`, `STRUCT`, `JSON`, `GEOGRAPHY`, `INTERVAL`, and more.
+- **Associations**: 1:1, 1:n, n:m relationships with automatic JOINs and eager loading.
+- **CRUD Operations**: Create, read (with search/sort/pagination), update, delete, bulk operations.
+- **Query Building**: Advanced `WHERE` with operators, `INCLUDE` for joins, `ORDER`, `GROUP`, `LIMIT/OFFSET`.
+- **Migrations**: Up/down scripts for schema changes, with in-memory tracking for free tier.
+- **Schema Tools**: Create/drop datasets/tables, add/remove/rename columns, partitioning/clustering.
+- **Free Tier Support**: Restricts DML to avoid billing; limits queries to 1TB/month.
+- **Logging**: Configurable console logging for operations, errors, and queries.
+- **Transactions**: Basic support (limited in free tier).
+- **Error Handling**: Descriptive errors for authentication, missing fields, free-tier violations.
 
 ## Installation
 
 ```bash
-npm install bg-orm
-npm install @google-cloud/bigquery  # Peer dependency
+npm install bq-orm @google-cloud/bigquery
 ```
+
+- `bq-orm`: The ORM library.
+- `@google-cloud/bigquery`: Peer dependency for BigQuery client.
+
+For TypeScript, no additional setup is needed—the library includes type definitions.
 
 ## Configuration
 
-```javascript
-import { BigQueryORM } from "bg-orm";
+Create an instance of `BigQueryORM`:
+
+```typescript
+import { BigQueryORM } from "bq-orm";
 
 const orm = new BigQueryORM({
   projectId: "your-project-id", // Required
-  dataset: "your-dataset", // Required
-  keyFilename: "/path/to/key.json", // Optional
-  logging: true, // Optional: Enable console logs
-  freeTierMode: true, // Optional: Enforce free-tier restrictions
+  dataset: "your-dataset", // Required; prompts if unset in CLI
+  keyFilename: "/path/to/key.json", // Optional for auth
+  logging: true, // Enable console logs (default: false)
+  freeTierMode: false, // Enable for free-tier restrictions (default: false)
 });
-
-await orm.authenticate(); // Throws if authentication fails
 ```
 
-Use environment variables for convenience:
+Environment variables (preferred for production):
 
-- `GOOGLE_CLOUD_PROJECT`
-- `BIGQUERY_DATASET`
-- `GOOGLE_APPLICATION_CREDENTIALS`
+- `GOOGLE_CLOUD_PROJECT`: Project ID.
+- `BIGQUERY_DATASET`: Dataset name.
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to service account key.
+- `BIGQUERY_ORM_LOGGING`: "true" to enable logging.
+
+## Authentication
+
+Verify credentials:
+
+```typescript
+try {
+  await orm.authenticate();
+  console.log("Authenticated successfully");
+} catch (err) {
+  console.error("Authentication failed:", err);
+}
+```
+
+- Throws if invalid credentials or network issues.
+- In free-tier mode, warns about SELECT-only limitations.
 
 ## Defining Models
 
-Models are abstract classes extending `Model`. Use `orm.define` or export functions in model files.
+Models extend an abstract `Model` class and are defined with attributes.
 
-### Model Initialization
-
-From the code, models are initialized with:
-
-```javascript
-static init(attributes: Record<string, DataType>, options: { orm: BigQueryORM; tableName?: string; primaryKey?: string })
-```
-
-- Sets `attributes`, `tableName`, `primaryKey`, and `orm`.
-- Default `primaryKey` is 'id' or the first primaryKey attribute.
-
-Example:
-
-```javascript
-const User = orm.define("User", {
-  id: DataTypes.INTEGER({ primaryKey: true, allowNull: false }),
-  name: DataTypes.STRING({ allowNull: false }),
-});
-```
-
-### Model Files Structure
-
-Model files are typically placed in a `/models` directory and exported as functions that define the model and associations.
-
-Example `/models/user.ts`:
+### Basic Model Definition
 
 ```typescript
-import { DataTypes } from "bg-orm"; // Assuming relative import
+import { BigQueryORM, DataTypes } from "bq-orm";
 
-export default (orm, DataTypes) => {
+const User = orm.define(
+  "User",
+  {
+    id: DataTypes.INTEGER({ primaryKey: true, allowNull: false }),
+    name: DataTypes.STRING({ allowNull: false }),
+    email: DataTypes.STRING({ allowNull: false }),
+    age: DataTypes.INTEGER(),
+    createdAt: DataTypes.DATETIME({ defaultValue: DataTypes.NOW }),
+    uuid: DataTypes.UUID({ defaultValue: DataTypes.UUIDV4 }),
+  },
+  {
+    tableName: "users", // Optional: defaults to lowercase model name
+    primaryKey: "id", // Optional: defaults to "id" or first primaryKey attribute
+  }
+);
+```
+
+- `attributes`: Record of field names to `DataType`.
+- Options: `tableName`, `primaryKey`.
+
+### Model Files and Loading
+
+For larger projects, define models in separate files under `/models`. Each file exports a function:
+
+`/models/user.ts`:
+
+```typescript
+import { BigQueryORM, DataTypes as DataTypesType } from "bq-orm";
+
+export default (orm: BigQueryORM, DataTypes: DataTypesType) => {
   const User = orm.define(
     "User",
     {
@@ -131,12 +168,12 @@ export default (orm, DataTypes) => {
       createdAt: DataTypes.DATETIME({ defaultValue: DataTypes.NOW }),
       uuid: DataTypes.UUID({ defaultValue: DataTypes.UUIDV4 }),
     },
-    { tableName: "users", primaryKey: "id" }
+    { tableName: "users" }
   );
 
-  User.associate = (models) => {
+  User.associate = (models: Record<string, typeof Model>) => {
+    orm.logger.info("[User:associate] Setting up associations");
     User.hasMany(models.Order, { foreignKey: "userId", as: "orders" });
-    User.belongsTo(models.Group, { foreignKey: "groupId", as: "group" });
   };
 
   return User;
@@ -145,296 +182,480 @@ export default (orm, DataTypes) => {
 
 Load all models:
 
-```javascript
-await orm.loadModels("./models"); // Loads and initializes associations
+```typescript
+await orm.loadModels("./models"); // Loads .ts/.js files, defines models, runs associates
 ```
 
-## All Supported Data Types
+- Automatically calls `associate` if defined.
+- Models are stored in `orm.models` (e.g., `orm.models.User`).
 
-Based on the `DataTypes` export in `dataTypes.ts`, here is a complete list with mappings and usage:
+## Supported Data Types
 
-- **STRING()**: BigQuery `STRING`. For text/variable-length strings.
-- **CHAR()**: Alias for `STRING`.
-- **TEXT()**: Alias for `STRING`.
-- **INTEGER()**: BigQuery `INT64`. For integers.
-- **TINYINT()**, **SMALLINT()**, **MEDIUMINT()**, **BIGINT()**: Aliases for `INT64`.
-- **FLOAT()**: BigQuery `FLOAT64`. For floating-point numbers.
-- **DOUBLE()**: Alias for `FLOAT64`.
-- **DECIMAL(precision: number, scale: number)**: BigQuery `NUMERIC` or `BIGNUMERIC`. E.g., `DECIMAL(10, 2)` for currency.
-- **BOOLEAN()**: BigQuery `BOOL`.
-- **DATE()**: BigQuery `DATE`.
-- **DATEONLY()**: Alias for `DATE`.
-- **TIME()**: BigQuery `TIME`.
-- **DATETIME()**: BigQuery `DATETIME`.
-- **JSON()**: BigQuery `JSON`. For semi-structured data.
-- **JSONB()**: Alias for `JSON`.
-- **BLOB()**: BigQuery `BYTES`. For binary data.
-- **BYTES()**: Alias for `BYTES`.
-- **UUID()**: BigQuery `STRING`. Use with `defaultValue: DataTypes.UUIDV4`.
-- **ARRAY(itemType: DataType)**: BigQuery `ARRAY`. E.g., `ARRAY(DataTypes.INTEGER())`.
-- **STRUCT(fields: Record<string, DataType>)**: BigQuery `STRUCT`. E.g., `STRUCT({ x: DataTypes.INTEGER() })`.
-- **GEOGRAPHY()**: BigQuery `GEOGRAPHY`. For spatial data.
-- **INTERVAL()**: BigQuery `INTERVAL`. For time durations.
-- **NOW**: Default value `CURRENT_TIMESTAMP()`.
-- **UUIDV4**: Default value `GENERATE_UUID()`.
+All BigQuery types are supported via `DataTypes`:
 
-Options for all types (where applicable):
+- Basic: `STRING()`, `INTEGER()`, `FLOAT()`, `BOOLEAN()`, `DATE()`, `TIME()`, `DATETIME()`.
+- Aliases: `CHAR()`, `TEXT()` → `STRING`; `DOUBLE()` → `FLOAT`; `TINYINT()` etc. → `INTEGER`.
+- Precision: `DECIMAL(precision, scale)` e.g., `DECIMAL(10, 2)`.
+- Advanced: `JSON()`, `BYTES()`, `UUID()` (STRING with UUIDV4 default).
+- Collections: `ARRAY(itemType)` e.g., `ARRAY(DataTypes.STRING())`.
+- Nested: `STRUCT(fields)` e.g., `STRUCT({ name: DataTypes.STRING() })`.
+- Spatial/Temporal: `GEOGRAPHY()`, `INTERVAL()`.
+- Defaults: `NOW` (`CURRENT_TIMESTAMP()`), `UUIDV4` (`GENERATE_UUID()`).
 
-- `allowNull?: boolean` (default: true)
-- `defaultValue?: any` (e.g., `DataTypes.NOW`, static value)
-- `primaryKey?: boolean`
-- `mode?: 'REPEATED'` (for arrays)
-- `fields?: Record<string, DataType>` (for STRUCT)
-- `precision?: number`, `scale?: number` (for DECIMAL/NUMERIC)
+Options for types: `{ allowNull: boolean, defaultValue: any, primaryKey: boolean, mode: 'REPEATED', fields: Record<string, DataType>, precision: number, scale: number }`.
 
-### Using JSON Data Type
+### Examples for Advanced Types
 
-Store JSON objects/arrays. Query using BigQuery JSON functions in raw queries.
+- JSON:
 
-Example:
+  ```typescript
+  preferences: DataTypes.JSON(), // Store { key: value }
+  ```
 
-```javascript
-const user = await User.create({ preferences: { theme: "dark", lang: "en" } });
+  Query example (raw): `SELECT JSON_VALUE(preferences, '$.key') FROM users`.
 
-// Raw query to extract
-const [rows] = await orm.bigquery.query(
-  `SELECT JSON_VALUE(preferences, '$.theme') FROM users`
-);
-```
+- ARRAY:
 
-### Using ARRAY Data Type
+  ```typescript
+  tags: DataTypes.ARRAY(DataTypes.STRING()), // Store ["tag1", "tag2"]
+  ```
 
-Store lists. Use `UNNEST` for querying.
+  Query example: `SELECT * FROM posts WHERE 'tag1' IN UNNEST(tags)`.
 
-Example:
+- STRUCT:
 
-```javascript
-const post = await Post.create({ tags: ["js", "orm"] });
+  ```typescript
+  address: DataTypes.STRUCT({ street: DataTypes.STRING(), city: DataTypes.STRING() }), // Store { street: "123 Main", city: "NY" }
+  ```
 
-// Raw query
-const [rows] = await orm.bigquery.query(
-  `SELECT * FROM posts WHERE 'js' IN UNNEST(tags)`
-);
-```
-
-### Using STRUCT Data Type
-
-Nested records.
-
-Example:
-
-```javascript
-const user = await User.create({ address: { street: "123 Main", city: "NY" } });
-
-// Query
-const [rows] = await orm.bigquery.query(`SELECT address.city FROM users`);
-```
+  Query example: `SELECT address.city FROM users`.
 
 ## Relationships (Associations)
 
-Associations are stored in `static associations: Record<string, Association>`.
+Associations define relationships between models. Define them in `associate` functions. The library handles JOINs automatically in queries with `include`.
 
-- `type`: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany'
-- `target`: Target model
-- `foreignKey`: Foreign key field
-- `otherKey?`: For belongsToMany
-- `as?`: Alias
-- `through?`: Junction model for belongsToMany
+### One-to-One (belongsTo, hasOne)
 
-### belongsTo
+- `belongsTo`: Target owns the foreign key (e.g., Order belongs to User).
 
-Adds foreignKey to source model.
+  `/models/order.ts`:
 
-```javascript
-Order.belongsTo(User, { foreignKey: "userId", as: "user" });
-```
+  ```typescript
+  Order.belongsTo(User, { foreignKey: "userId", as: "user" }); // Adds userId to Order
+  ```
 
-### hasOne
+- `hasOne`: Source owns the relationship (e.g., User has one Profile).
 
-Target has foreignKey referencing source.
+  `/models/user.ts`:
 
-```javascript
-User.hasOne(Profile, { foreignKey: "userId", as: "profile" });
-```
+  ```typescript
+  User.hasOne(Profile, { foreignKey: "userId", as: "profile" }); // Profile has userId
+  ```
 
-### hasMany
+Example Query:
 
-Target has foreignKey, results in array.
-
-```javascript
-User.hasMany(Order, { foreignKey: "userId", as: "orders" });
-```
-
-### belongsToMany
-
-Uses through model.
-
-```javascript
-Post.belongsToMany(Tag, {
-  through: PostTag,
-  foreignKey: "postId",
-  otherKey: "tagId",
-  as: "tags",
+```typescript
+const order = await Order.findOne({
+  include: [{ model: User, as: "user" }],
 });
+console.log(order.user.name); // Nested user data
 ```
 
-Eager load with `include` in find options.
+### One-to-Many (hasMany)
+
+- Source has multiple targets (e.g., User has many Orders).
+
+  `/models/user.ts`:
+
+  ```typescript
+  User.hasMany(Order, { foreignKey: "userId", as: "orders" });
+  ```
+
+  `/models/order.ts`:
+
+  ```typescript
+  Order.belongsTo(User, { foreignKey: "userId", as: "user" });
+  ```
+
+Example Query:
+
+```typescript
+const user = await User.findOne({
+  include: [
+    { model: Order, as: "orders", where: { amount: { [Op.gt]: 100 } } },
+  ],
+});
+console.log(user.orders.length); // Array of orders
+```
+
+### Many-to-Many (belongsToMany)
+
+- Uses a junction model (through).
+
+  `/models/post.ts`:
+
+  ```typescript
+  Post.belongsToMany(Tag, {
+    through: PostTag,
+    foreignKey: "postId",
+    otherKey: "tagId",
+    as: "tags",
+  });
+  ```
+
+  `/models/tag.ts`:
+
+  ```typescript
+  Tag.belongsToMany(Post, {
+    through: PostTag,
+    foreignKey: "tagId",
+    otherKey: "postId",
+    as: "posts",
+  });
+  ```
+
+  Junction model `/models/postTag.ts`:
+
+  ```typescript
+  const PostTag = orm.define(
+    "PostTag",
+    {
+      postId: DataTypes.INTEGER({ allowNull: false }),
+      tagId: DataTypes.INTEGER({ allowNull: false }),
+    },
+    { tableName: "post_tags" }
+  );
+  ```
+
+Example Query:
+
+```typescript
+const post = await Post.findOne({
+  include: [{ model: Tag, as: "tags" }],
+});
+console.log(post.tags.map((t) => t.name)); // Array of tags
+```
 
 ## Model Methods
 
-All static methods from `model.ts`:
+All methods are static on the model class (e.g., `User.findAll()`).
 
-### Query Methods
+### CRUD Methods (Create, Update, Destroy)
 
-- **findAll(options: FindOptions = {})**: Returns array of records. Supports raw: true for flat results.
-- **findOne(options: FindOptions = {})**: Returns first record or null. Internally calls findAll with limit 1.
-- **findByPk(pk: any, options: FindOptions = {})**: Finds by primary key.
-- **count(options: FindOptions = {})**: Returns count of distinct primary keys.
+- `create(data)`: Insert one record.
+- `bulkCreate(dataArray)`: Insert multiple.
+- `update(data, { where })`: Update matching records, returns affected count.
+- `destroy({ where })`: Delete matching, returns affected count.
 
-### CRUD Methods
+### Query Methods (findAll, findOne, findByPk, count)
 
-- **create(data: Record<string, any>)**: Inserts one record, resolves defaults (NOW, UUIDV4).
-- **bulkCreate(data: Record<string, any>[]) **: Inserts multiple, fills defaults.
-- **update(data: Record<string, any>, options: { where: WhereOptions })**: Updates matching records, returns affected rows.
-- **destroy(options: { where: WhereOptions })**: Deletes matching records, returns affected rows.
+- `findAll(options)`: Fetch all with options; returns array (nested for includes).
+- `findOne(options)`: Fetch first or null.
+- `findByPk(pk, options)`: Fetch by primary key.
+- `count(options)`: Count distinct primary keys.
 
-### Utility Methods
+### Utility Methods (Increment, Decrement)
 
-- **increment(fields: string | string[], options: { by?: number; where: WhereOptions })**: Increments fields.
-- **decrement(fields: string | string[], options: { by?: number; where: WhereOptions })**: Decrements (negative increment).
-- **init(...)**: Initializes model (called internally).
-- **belongsTo(...)**, **hasOne(...)**, **hasMany(...)**, **belongsToMany(...)**: Define associations.
+- `increment(fields, { by: number, where })`: Increment fields by value (default 1).
+- `decrement(fields, { by: number, where })`: Decrement (negative increment).
 
-Private:
+## Querying Data
 
-- resolveDefault: Handles NOW/UUIDV4.
-- buildSelectQuery: Builds SQL for selects.
-- nestAssociations: Nests included data.
+### Where Clauses and Operators
 
-## Query Options
+Use `Op` for conditions:
 
-`FindOptions`:
+```typescript
+import { Op } from "bq-orm";
 
-- `attributes?: string[]` (default: all)
-- `where?: WhereOptions` (supports operators, and/or)
-- `include?: IncludeOptions[]` (model, as, where, required, attributes)
-- `order?: [string, 'ASC' | 'DESC'][]`
-- `group?: string[]`
-- `limit?: number`
-- `offset?: number`
-- `raw?: boolean` (flat results)
+await User.findAll({
+  where: {
+    age: { [Op.gte]: 18, [Op.lt]: 65 }, // AND
+    [Op.or]: [{ name: "John" }, { email: "john@example.com" }], // OR
+    tags: { [Op.contains]: "developer" }, // For ARRAY
+  },
+});
+```
 
-`WhereOptions`: Key-value or { [Op]: value }, arrays for IN, nested and/or.
+Operators (`Op`): eq, ne, gt, gte, lt, lte, like, notLike, in, notIn, between, notBetween, is, isNot, and, or, not, any, all, contains, contained, add.
 
-## CRUD Operations
+### Searching (LIKE, IN, etc.)
 
-See examples in previous sections. All methods throw in freeTierMode for DML.
+- String search: `{ name: { [Op.like]: "%John%" } }`
+- Array search: `{ id: { [Op.in]: [1, 2, 3] } }`
+- Range: `{ age: { [Op.between]: [18, 30] } }`
+
+Example:
+
+```typescript
+const users = await User.findAll({
+  where: {
+    name: { [Op.like]: "%Doe%" },
+    tags: { [Op.contains]: "orm" }, // ARRAY contains "orm"
+  },
+});
+```
+
+### Sorting (ORDER BY)
+
+```typescript
+await User.findAll({
+  order: [
+    ["age", "DESC"],
+    ["name", "ASC"],
+  ],
+});
+```
+
+### Pagination (LIMIT, OFFSET)
+
+```typescript
+await User.findAll({
+  limit: 10,
+  offset: 20, // Skip first 20
+});
+```
+
+### Grouping and Aggregations
+
+```typescript
+await User.findAll({
+  attributes: ["age", "COUNT(*) AS count"], // Use raw for aggregates
+  group: ["age"],
+  raw: true, // Flat results
+});
+```
+
+For complex aggregates, use raw queries.
+
+### Eager Loading (Include)
+
+Load associations:
+
+```typescript
+await User.findAll({
+  include: [
+    {
+      model: Order,
+      as: "orders",
+      required: true,
+      attributes: ["amount"],
+      where: { amount: { [Op.gt]: 50 } },
+    },
+  ],
+});
+```
+
+- `required: true`: INNER JOIN (must have association).
+- `attributes`: Select specific fields from included model.
+
+### Raw Queries
+
+Use `QueryInterface` for custom SQL:
+
+```typescript
+const qi = orm.getQueryInterface();
+const [rows] = await qi.query("SELECT * FROM users WHERE age > @age", {
+  age: 18,
+});
+```
+
+## CRUD Operations with Examples
+
+- Create:
+
+  ```typescript
+  const user = await User.create({
+    name: "Jane Doe",
+    email: "jane@example.com",
+    age: 25,
+  });
+  ```
+
+- Bulk Create:
+
+  ```typescript
+  await User.bulkCreate([
+    { name: "Alice", email: "alice@example.com" },
+    { name: "Bob", email: "bob@example.com" },
+  ]);
+  ```
+
+- Update:
+
+  ```typescript
+  const updatedCount = await User.update({ age: 26 }, { where: { id: 1 } });
+  ```
+
+- Destroy:
+
+  ```typescript
+  const deletedCount = await User.destroy({ where: { age: { [Op.lt]: 18 } } });
+  ```
+
+- Increment:
+
+  ```typescript
+  await User.increment("age", { by: 1, where: { id: 1 } });
+  ```
 
 ## Query Interface
 
-Methods from `queryInterface.ts`:
+### Schema Operations
 
-- createTable(tableName, attributes, options: { partitionBy?, clusterBy? })
-- dropTable(tableName)
-- addColumn(tableName, columnName, type)
-- removeColumn(tableName, columnName)
-- renameColumn(tableName, oldName, newName)
-- changeColumn(tableName, columnName, type) // Limited support
-- addPartition(tableName, partitionBy) // Warns, requires recreation
-- addClustering(tableName, clusterBy)
-- query(sql, params?)
+```typescript
+const qi = orm.getQueryInterface();
+await qi.addColumn("users", "bio", DataTypes.TEXT());
+await qi.removeColumn("users", "age");
+await qi.renameColumn("users", "email", "emailAddress");
+await qi.changeColumn("users", "age", DataTypes.INTEGER({ allowNull: true }));
+await qi.addClustering("users", ["name"]);
+```
 
-Accessed via `orm.getQueryInterface()`.
+- `addPartition`: Warns; requires manual recreation for existing tables.
+
+## Creating Datasets and Tables
+
+- Dataset:
+
+  ```typescript
+  await orm.createDataset({ location: "US", labels: { env: "dev" } });
+  ```
+
+- Table (via QueryInterface):
+
+  ```typescript
+  await qi.createTable(
+    "profiles",
+    {
+      id: DataTypes.INTEGER({ primaryKey: true }),
+      userId: DataTypes.INTEGER({ allowNull: false }),
+      bio: DataTypes.TEXT(),
+    },
+    { partitionBy: "createdAt", clusterBy: ["userId"] }
+  );
+  ```
 
 ## Migrations
 
-Migrations use `runMigrations(path)` and `revertLastMigration(path)`.
+Migrations manage schema changes via scripts.
 
 ### Migration Files Structure
 
-Files in `/migrations` as `.ts` or `.js`, exported as object with `up` and `down` async functions.
-
-Example `/migrations/20230812-create-users.ts`:
+Files in `/migrations` (e.g., `20250825_create_profiles.ts`):
 
 ```typescript
+import { QueryInterface } from "bq-orm";
+import { BigQueryORM, DataTypes } from "bq-orm";
+
 export default {
-  async up(qi, orm) {
+  async up(qi: QueryInterface, orm: BigQueryORM): Promise<void> {
+    orm.logger.info("[Migration:create_profiles] Creating profiles table");
     await qi.createTable(
-      "users",
+      "profiles",
       {
         id: DataTypes.INTEGER({ primaryKey: true, allowNull: false }),
-        name: DataTypes.STRING({ allowNull: false }),
-        email: DataTypes.STRING(),
-        age: DataTypes.INTEGER(),
-        createdAt: DataTypes.DATETIME({ defaultValue: DataTypes.NOW }),
+        userId: DataTypes.INTEGER({ allowNull: false }),
+        bio: DataTypes.TEXT(),
       },
-      { partitionBy: "createdAt", clusterBy: ["name"] }
+      { clusterBy: ["userId"] }
     );
   },
-  async down(qi, orm) {
-    await qi.dropTable("users");
+  async down(qi: QueryInterface, orm: BigQueryORM): Promise<void> {
+    await qi.dropTable("profiles");
   },
 };
 ```
 
-- `qi`: QueryInterface
-- `orm`: BigQueryORM instance
-- Files sorted alphabetically, executed if not recorded.
+- Use `qi` for schema ops, `orm.logger` for logging.
+- Files sorted alphabetically; executed if not already run.
 
-In freeTierMode, tracked in-memory.
+### Running and Reverting Migrations
 
-### Running Migrations
-
-```javascript
-await orm.runMigrations("./migrations");
-await orm.revertLastMigration("./migrations"); // Reverts last executed
+```typescript
+await orm.runMigrations("./migrations"); // Applies pending migrations
+await orm.revertLastMigration("./migrations"); // Reverts the last one
 ```
 
-## Free Tier Mode
+- In free-tier: In-memory tracking; no DML.
 
-- Disables DML (INSERT/UPDATE/DELETE/ALTER).
-- Limits table creation/deletion to storage quotas.
-- Migrations tracked in-memory.
+### Migration Examples
 
-## Operators (Op)
+- Add Column Migration (`20250826_add_column.ts`):
 
-From `op.ts`: eq, ne, gt, gte, lt, lte, like, notLike, in, notIn, between, notBetween, is, isNot, and, or, not, any, all, contains, contained, add.
+  ```typescript
+  export default {
+    async up(qi: QueryInterface, orm: BigQueryORM): Promise<void> {
+      await qi.addColumn("users", "phone", DataTypes.STRING());
+    },
+    async down(qi: QueryInterface, orm: BigQueryORM): Promise<void> {
+      await qi.removeColumn("users", "phone");
+    },
+  };
+  ```
 
-Used in `where`: { age: { [Op.gte]: 18 } }
+- Relationship Migration: Create junction table for many-to-many.
 
-## Syncing Schema
+## Schema Syncing
 
-`orm.sync({ force?: boolean, alter?: boolean })`
+Automatically create/update tables based on models:
 
-- Creates dataset/tables if missing.
-- force: Drops and recreates.
-- alter: Warns (not fully supported).
+```typescript
+await orm.sync({ force: true }); // Drop and recreate tables
+await orm.sync({ alter: true }); // Alter (limited support)
+```
+
+- Use migrations for production.
 
 ## Transactions
 
-`orm.transaction(async (qi) => { ... })`
+```typescript
+await orm.transaction(async (qi) => {
+  await qi.query("INSERT INTO users (name) VALUES ('Test')");
+});
+```
 
-- Limited in free tier to SELECT.
+- Limited to SELECT in free-tier.
 
-## Loading Models
+## Free Tier Mode
 
-`orm.loadModels(path)`: Loads `.ts`/`.js` files, calls default export with (orm, DataTypes), then associates.
+Set `freeTierMode: true`:
 
-## Error Handling
+- Disables INSERT/UPDATE/DELETE/ALTER.
+- Warns on storage-impacting ops (e.g., table create).
+- Migration tracking in-memory.
 
-- Authentication failures.
-- Free tier restrictions.
-- Streaming buffer errors (wait and retry).
-- Missing required fields.
-- Association not found.
+Enable billing at https://console.cloud.google.com/billing for full features.
 
 ## Logging
 
-`logging: true` logs creations, executions, etc.
+- Enabled via `logging: true` or env var.
+- Logs: Operations, queries, errors (e.g., `[Model:findAll] Found 5 records`).
+- Access: `orm.logger.info("Message", { data })`.
+
+## Error Handling
+
+- Authentication: Throws on failure.
+- Missing Fields: Throws in create/update.
+- Free Tier: Throws on restricted ops.
+- Associations: Throws if invalid (e.g., missing through model).
+- Streaming Buffer: Suggest retry for recent inserts.
+
+Catch errors in try/catch blocks.
+
+## Best Practices and Tips
+
+- **Performance**: Use clustering/partitioning for large tables.
+- **Queries**: Prefer parameterized queries to avoid SQL injection.
+- **Relations**: Define bidirectional for full eager loading.
+- **Migrations**: Version files with dates (YYYYMMDD_name.ts).
+- **Testing**: Mock BigQuery client for unit tests.
+- **Limitations**: No real-time transactions; BigQuery is analytical.
+- **Debugging**: Enable logging; use raw queries for complex ops.
 
 ## Contributing
 
-Fork, PR to [repo].
+Fork the repo, add features/fixes, submit PRs. Follow code style from source.
 
 ## License
 

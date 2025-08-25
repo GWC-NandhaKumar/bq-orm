@@ -25,6 +25,6 @@ export class NoopLogger implements Logger {
   error(): void {}
 }
 
-export function createLogger(enabled: boolean): Logger {
+export function createLogger(enabled: boolean | undefined): Logger {
   return enabled ? new ConsoleLogger() : new NoopLogger();
 }

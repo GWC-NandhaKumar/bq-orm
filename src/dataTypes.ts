@@ -1,3 +1,4 @@
+// src/dataTypes.ts
 import * as crypto from "crypto";
 
 export interface DataTypeAttribute {
@@ -11,117 +12,94 @@ export interface DataTypeAttribute {
   scale?: number;
 }
 
-export const DataTypes = {
-  STRING: (options: any = {}) => ({
-    type: "STRING",
-    allowNull: true,
-    ...options,
-  }),
-  CHAR: (options: any = {}) => ({
-    type: "STRING",
-    allowNull: true,
-    ...options,
-  }),
-  TEXT: (options: any = {}) => ({
-    type: "STRING",
-    allowNull: true,
-    ...options,
-  }),
-  INTEGER: (options: any = {}) => ({
-    type: "INT64",
-    allowNull: true,
-    ...options,
-  }),
-  TINYINT: (options: any = {}) => ({
-    type: "INT64",
-    allowNull: true,
-    ...options,
-  }),
-  SMALLINT: (options: any = {}) => ({
-    type: "INT64",
-    allowNull: true,
-    ...options,
-  }),
-  MEDIUMINT: (options: any = {}) => ({
-    type: "INT64",
-    allowNull: true,
-    ...options,
-  }),
-  BIGINT: (options: any = {}) => ({
-    type: "INT64",
-    allowNull: true,
-    ...options,
-  }),
-  FLOAT: (options: any = {}) => ({
-    type: "FLOAT64",
-    allowNull: true,
-    ...options,
-  }),
-  DOUBLE: (options: any = {}) => ({
-    type: "FLOAT64",
-    allowNull: true,
-    ...options,
-  }),
-  DECIMAL: (precision: number, scale: number, options: any = {}) => ({
+export type DataType = DataTypeAttribute;
+
+export interface DataTypes {
+  STRING: (options?: Partial<DataTypeAttribute>) => DataType;
+  CHAR: (options?: Partial<DataTypeAttribute>) => DataType;
+  TEXT: (options?: Partial<DataTypeAttribute>) => DataType;
+  INTEGER: (options?: Partial<DataTypeAttribute>) => DataType;
+  TINYINT: (options?: Partial<DataTypeAttribute>) => DataType;
+  SMALLINT: (options?: Partial<DataTypeAttribute>) => DataType;
+  MEDIUMINT: (options?: Partial<DataTypeAttribute>) => DataType;
+  BIGINT: (options?: Partial<DataTypeAttribute>) => DataType;
+  FLOAT: (options?: Partial<DataTypeAttribute>) => DataType;
+  DOUBLE: (options?: Partial<DataTypeAttribute>) => DataType;
+  DECIMAL: (
+    precision: number,
+    scale: number,
+    options?: Partial<DataTypeAttribute>
+  ) => DataType;
+  BOOLEAN: (options?: Partial<DataTypeAttribute>) => DataType;
+  DATE: (options?: Partial<DataTypeAttribute>) => DataType;
+  DATEONLY: (options?: Partial<DataTypeAttribute>) => DataType;
+  TIME: (options?: Partial<DataTypeAttribute>) => DataType;
+  DATETIME: (options?: Partial<DataTypeAttribute>) => DataType;
+  JSON: (options?: Partial<DataTypeAttribute>) => DataType;
+  JSONB: (options?: Partial<DataTypeAttribute>) => DataType;
+  BLOB: (options?: Partial<DataTypeAttribute>) => DataType;
+  UUID: (options?: Partial<DataTypeAttribute>) => DataType;
+  ARRAY: (itemType: DataType) => DataType;
+  STRUCT: (
+    fields: Record<string, DataType>,
+    options?: Partial<DataTypeAttribute>
+  ) => DataType;
+  GEOGRAPHY: (options?: Partial<DataTypeAttribute>) => DataType;
+  INTERVAL: (options?: Partial<DataTypeAttribute>) => DataType;
+  BYTES: (options?: Partial<DataTypeAttribute>) => DataType;
+  NOW: string;
+  UUIDV4: string;
+}
+
+export const DataTypes: DataTypes = {
+  STRING: (options = {}) => ({ type: "STRING", allowNull: true, ...options }),
+  CHAR: (options = {}) => ({ type: "STRING", allowNull: true, ...options }),
+  TEXT: (options = {}) => ({ type: "STRING", allowNull: true, ...options }),
+  INTEGER: (options = {}) => ({ type: "INT64", allowNull: true, ...options }),
+  TINYINT: (options = {}) => ({ type: "INT64", allowNull: true, ...options }),
+  SMALLINT: (options = {}) => ({ type: "INT64", allowNull: true, ...options }),
+  MEDIUMINT: (options = {}) => ({ type: "INT64", allowNull: true, ...options }),
+  BIGINT: (options = {}) => ({ type: "INT64", allowNull: true, ...options }),
+  FLOAT: (options = {}) => ({ type: "FLOAT64", allowNull: true, ...options }),
+  DOUBLE: (options = {}) => ({ type: "FLOAT64", allowNull: true, ...options }),
+  DECIMAL: (precision: number, scale: number, options = {}) => ({
     type: "NUMERIC",
     precision,
     scale,
     allowNull: true,
     ...options,
   }),
-  BOOLEAN: (options: any = {}) => ({
-    type: "BOOL",
-    allowNull: true,
-    ...options,
-  }),
-  DATE: (options: any = {}) => ({
-    type: "TIMESTAMP",
-    allowNull: true,
-    ...options,
-  }),
-  DATEONLY: (options: any = {}) => ({
-    type: "DATE",
-    allowNull: true,
-    ...options,
-  }),
-  TIME: (options: any = {}) => ({ type: "TIME", allowNull: true, ...options }),
-  DATETIME: (options: any = {}) => ({
+  BOOLEAN: (options = {}) => ({ type: "BOOL", allowNull: true, ...options }),
+  DATE: (options = {}) => ({ type: "TIMESTAMP", allowNull: true, ...options }),
+  DATEONLY: (options = {}) => ({ type: "DATE", allowNull: true, ...options }),
+  TIME: (options = {}) => ({ type: "TIME", allowNull: true, ...options }),
+  DATETIME: (options = {}) => ({
     type: "DATETIME",
     allowNull: true,
     ...options,
   }),
-  JSON: (options: any = {}) => ({ type: "JSON", allowNull: true, ...options }),
-  JSONB: (options: any = {}) => ({ type: "JSON", allowNull: true, ...options }),
-  BLOB: (options: any = {}) => ({ type: "BYTES", allowNull: true, ...options }),
-  UUID: (options: any = {}) => ({
-    type: "STRING",
-    allowNull: true,
-    ...options,
-  }),
-  ARRAY: (itemType: DataTypeAttribute) => ({ ...itemType, mode: "REPEATED" }),
-  STRUCT: (fields: Record<string, DataTypeAttribute>, options: any = {}) => ({
+  JSON: (options = {}) => ({ type: "JSON", allowNull: true, ...options }),
+  JSONB: (options = {}) => ({ type: "JSON", allowNull: true, ...options }),
+  BLOB: (options = {}) => ({ type: "BYTES", allowNull: true, ...options }),
+  UUID: (options = {}) => ({ type: "STRING", allowNull: true, ...options }),
+  ARRAY: (itemType: DataType) => ({ ...itemType, mode: "REPEATED" }),
+  STRUCT: (fields: Record<string, DataType>, options = {}) => ({
     type: "STRUCT",
     fields,
     allowNull: true,
     ...options,
   }),
-  GEOGRAPHY: (options: any = {}) => ({
+  GEOGRAPHY: (options = {}) => ({
     type: "GEOGRAPHY",
     allowNull: true,
     ...options,
   }),
-  INTERVAL: (options: any = {}) => ({
+  INTERVAL: (options = {}) => ({
     type: "INTERVAL",
     allowNull: true,
     ...options,
   }),
-  BYTES: (options: any = {}) => ({
-    type: "BYTES",
-    allowNull: true,
-    ...options,
-  }),
+  BYTES: (options = {}) => ({ type: "BYTES", allowNull: true, ...options }),
   NOW: "CURRENT_TIMESTAMP()",
   UUIDV4: "GENERATE_UUID()",
 };
-
-export type DataType = DataTypeAttribute;
