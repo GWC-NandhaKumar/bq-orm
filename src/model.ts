@@ -27,6 +27,7 @@ export interface FindOptions {
   limit?: number;
   offset?: number;
   raw?: boolean;
+  distinct?: boolean;
 }
 
 export interface Association {
@@ -36,6 +37,29 @@ export interface Association {
   otherKey?: string;
   as?: string;
   through?: typeof Model;
+}
+
+export interface FindAndCountAllResult {
+  rows: any[];
+  count: number;
+}
+
+export interface BulkCreateOptions {
+  validate?: boolean;
+  ignoreDuplicates?: boolean;
+  returning?: boolean;
+}
+
+export interface UpdateOptions {
+  where: WhereOptions;
+  returning?: boolean;
+  individualHooks?: boolean;
+}
+
+export interface DestroyOptions {
+  where: WhereOptions;
+  force?: boolean;
+  cascade?: boolean;
 }
 
 export abstract class Model {
@@ -169,6 +193,148 @@ export abstract class Model {
     return this.findOne({ ...options, where: { [this.primaryKey]: pk } });
   }
 
+  static async findAndCountAll(
+    options: FindOptions = {}
+  ): Promise<FindAndCountAllResult> {
+    this.orm.logger.info(
+      `[Model:findAndCountAll] Finding and counting records for ${this.name}`,
+      { options }
+    );
+
+    const dataset = this.orm.config.dataset;
+    const mainAlias = this.tableName;
+    const selectClause: string[] = [];
+    const params: Record<string, any> = {};
+    let sql = `FROM \`${dataset}.${this.tableName}\` AS \`${mainAlias}\``;
+    const whereClauses: string[] = [];
+
+    // Build select clause for rows
+    const mainAttributes = options.attributes || Object.keys(this.attributes);
+    for (const field of mainAttributes) {
+      selectClause.push(
+        `\`${mainAlias}\`.\`${field}\` AS \`${mainAlias}_${field}\``
+      );
+    }
+
+    // Handle includes (associations)
+    if (options.include) {
+      for (const inc of options.include) {
+        const as = inc.as || inc.model.tableName;
+        const assoc = Object.values(this.associations).find(
+          (a) => a.as === as && a.target === inc.model
+        );
+        if (!assoc) {
+          this.orm.logger.error(
+            `[Model:findAndCountAll] Association not found for ${inc.model.name} in ${this.name}`
+          );
+          throw new Error(`Association not found for ${inc.model.name}`);
+        }
+        const joinType = inc.required ? "INNER JOIN" : "LEFT OUTER JOIN";
+        let joinOn: string;
+        if (assoc.type === "belongsTo") {
+          joinOn = `\`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
+          sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
+        } else if (assoc.type === "hasOne" || assoc.type === "hasMany") {
+          joinOn = `\`${mainAlias}\`.\`${this.primaryKey}\` = \`${as}\`.\`${assoc.foreignKey}\``;
+          sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
+        } else if (assoc.type === "belongsToMany") {
+          if (!assoc.through || !assoc.otherKey) {
+            this.orm.logger.error(
+              `[Model:findAndCountAll] Through model and otherKey required for belongsToMany in ${this.name}`
+            );
+            throw new Error(
+              "Through model and otherKey required for belongsToMany"
+            );
+          }
+          const throughAs = `${as}_through`;
+          const throughTable = assoc.through.tableName;
+          sql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON \`${mainAlias}\`.\`${this.primaryKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          joinOn = `\`${throughAs}\`.\`${assoc.otherKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
+          sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
+        }
+
+        if (inc.where) {
+          const { clause, params: incParams } = buildWhereClause(inc.where);
+          const prefixedClause = clause.replace(/`([^`]+)`/g, `\`${as}\`.$1`);
+          whereClauses.push(prefixedClause);
+          Object.assign(params, incParams);
+        }
+
+        // Add included model attributes
+        const incAttributes =
+          inc.attributes || Object.keys(inc.model.attributes);
+        for (const field of incAttributes) {
+          selectClause.push(`\`${as}\`.\`${field}\` AS \`${as}_${field}\``);
+        }
+      }
+    }
+
+    // Handle where conditions
+    let mainWhere = "";
+    if (options.where) {
+      const { clause, params: mParams } = buildWhereClause(options.where);
+      mainWhere = clause;
+      Object.assign(params, mParams);
+    }
+
+    let whereClause = [mainWhere, ...whereClauses]
+      .filter((c) => c)
+      .join(" AND ");
+    if (whereClause) {
+      sql += ` WHERE ${whereClause}`;
+    }
+
+    // Build count subquery
+    const countSelect = options.distinct
+      ? `COUNT(DISTINCT \`${mainAlias}\`.\`${this.primaryKey}\`)`
+      : `COUNT(*)`;
+    let countSql = `SELECT ${countSelect} AS total_count FROM \`${dataset}.${this.tableName}\` AS \`${mainAlias}\``;
+    if (whereClause) {
+      countSql += ` WHERE ${whereClause}`;
+    }
+
+    // Combine queries using a CTE
+    let finalSql = `
+    WITH count_query AS (${countSql}),
+         data_query AS (
+           SELECT ${options.distinct ? "DISTINCT" : ""} ${selectClause.join(
+      ", "
+    )}
+           ${sql}
+           ${
+             options.group
+               ? `GROUP BY ${options.group.map((g) => `\`${g}\``).join(", ")}`
+               : ""
+           }
+           ${
+             options.order
+               ? `ORDER BY ${options.order
+                   .map(([field, dir]) => `\`${field}\` ${dir}`)
+                   .join(", ")}`
+               : ""
+           }
+           ${options.limit ? `LIMIT ${options.limit}` : ""}
+           ${options.offset ? `OFFSET ${options.offset}` : ""}
+         )
+    SELECT data_query.*, (SELECT total_count FROM count_query) AS total_count
+    FROM data_query
+  `;
+
+    // Execute query
+    const [rows] = await this.orm.bigquery.query({ query: finalSql, params });
+    const resultRows = options.raw
+      ? rows
+      : this.nestAssociations(rows, options.include || []);
+
+    const count = rows[0]?.total_count || 0;
+
+    this.orm.logger.info(
+      `[Model:findAndCountAll] Found ${resultRows.length} rows with total count ${count} for ${this.name}`
+    );
+
+    return { rows: resultRows, count };
+  }
+
   static async count(options: FindOptions = {}): Promise<number> {
     this.orm.logger.info(`[Model:count] Counting records for ${this.name}`, {
       options,
@@ -181,6 +347,87 @@ export abstract class Model {
       `[Model:count] Counted ${count} records for ${this.name}`
     );
     return count;
+  }
+
+  static async max(
+    field: string,
+    options: FindOptions = {}
+  ): Promise<number | null> {
+    this.orm.logger.info(
+      `[Model:max] Getting max value for field ${field} in ${this.name}`,
+      {
+        field,
+        options,
+      }
+    );
+    const select = `MAX(\`${this.tableName}\`.\`${field}\`) AS max_value`;
+    const { sql, params } = this.buildSelectQuery(options, select);
+    const [rows] = await this.orm.bigquery.query({ query: sql, params });
+    const maxValue = rows[0]?.max_value || null;
+    this.orm.logger.info(
+      `[Model:max] Max value for ${field}: ${maxValue} in ${this.name}`
+    );
+    return maxValue;
+  }
+
+  static async min(
+    field: string,
+    options: FindOptions = {}
+  ): Promise<number | null> {
+    this.orm.logger.info(
+      `[Model:min] Getting min value for field ${field} in ${this.name}`,
+      {
+        field,
+        options,
+      }
+    );
+    const select = `MIN(\`${this.tableName}\`.\`${field}\`) AS min_value`;
+    const { sql, params } = this.buildSelectQuery(options, select);
+    const [rows] = await this.orm.bigquery.query({ query: sql, params });
+    const minValue = rows[0]?.min_value || null;
+    this.orm.logger.info(
+      `[Model:min] Min value for ${field}: ${minValue} in ${this.name}`
+    );
+    return minValue;
+  }
+
+  static async sum(field: string, options: FindOptions = {}): Promise<number> {
+    this.orm.logger.info(
+      `[Model:sum] Getting sum for field ${field} in ${this.name}`,
+      {
+        field,
+        options,
+      }
+    );
+    const select = `SUM(\`${this.tableName}\`.\`${field}\`) AS sum_value`;
+    const { sql, params } = this.buildSelectQuery(options, select);
+    const [rows] = await this.orm.bigquery.query({ query: sql, params });
+    const sumValue = rows[0]?.sum_value || 0;
+    this.orm.logger.info(
+      `[Model:sum] Sum for ${field}: ${sumValue} in ${this.name}`
+    );
+    return sumValue;
+  }
+
+  static async average(
+    field: string,
+    options: FindOptions = {}
+  ): Promise<number | null> {
+    this.orm.logger.info(
+      `[Model:average] Getting average for field ${field} in ${this.name}`,
+      {
+        field,
+        options,
+      }
+    );
+    const select = `AVG(\`${this.tableName}\`.\`${field}\`) AS avg_value`;
+    const { sql, params } = this.buildSelectQuery(options, select);
+    const [rows] = await this.orm.bigquery.query({ query: sql, params });
+    const avgValue = rows[0]?.avg_value || null;
+    this.orm.logger.info(
+      `[Model:average] Average for ${field}: ${avgValue} in ${this.name}`
+    );
+    return avgValue;
   }
 
   private static resolveDefault(value: any): any {
@@ -223,7 +470,10 @@ export abstract class Model {
     return filledData;
   }
 
-  static async bulkCreate(data: Record<string, any>[]): Promise<void> {
+  static async bulkCreate(
+    data: Record<string, any>[],
+    options: BulkCreateOptions = {}
+  ): Promise<any[]> {
     this.orm.logger.info(
       `[Model:bulkCreate] Creating ${data.length} records for ${this.name}`
     );
@@ -235,7 +485,7 @@ export abstract class Model {
     }
     if (!data.length) {
       this.orm.logger.info("[Model:bulkCreate] No records to create, skipping");
-      return;
+      return [];
     }
     const filledData = data.map((record) => {
       const filled: Record<string, any> = {};
@@ -244,7 +494,7 @@ export abstract class Model {
           filled[field] = record[field];
         } else if (attr.defaultValue !== undefined) {
           filled[field] = this.resolveDefault(attr.defaultValue);
-        } else if (attr.allowNull === false) {
+        } else if (attr.allowNull === false && options.validate !== false) {
           this.orm.logger.error(
             `[Model:bulkCreate] Missing required field ${field} in bulk create record for ${this.name}`
           );
@@ -262,11 +512,12 @@ export abstract class Model {
     this.orm.logger.info(
       `[Model:bulkCreate] ${filledData.length} records created for ${this.name}`
     );
+    return options.returning ? filledData : [];
   }
 
   static async update(
     data: Record<string, any>,
-    options: { where: WhereOptions }
+    options: UpdateOptions
   ): Promise<number> {
     this.orm.logger.info(`[Model:update] Updating records for ${this.name}`, {
       data,
@@ -307,7 +558,7 @@ export abstract class Model {
     return affectedRows;
   }
 
-  static async destroy(options: { where: WhereOptions }): Promise<number> {
+  static async destroy(options: DestroyOptions): Promise<number> {
     this.orm.logger.info(`[Model:destroy] Deleting records for ${this.name}`, {
       options,
     });
@@ -321,19 +572,35 @@ export abstract class Model {
     const sql = `DELETE FROM \`${this.orm.config.dataset}.${
       this.tableName
     }\` WHERE ${clause || "TRUE"}`;
-    const [job] = await this.orm.bigquery.createQueryJob({
-      query: sql,
-      params,
-    });
-    await job.getQueryResults();
-    const [metadata] = await job.getMetadata();
-    const affectedRows = Number(
-      metadata.statistics?.query?.numDmlAffectedRows || 0
-    );
-    this.orm.logger.info(
-      `[Model:destroy] Deleted ${affectedRows} records for ${this.name}`
-    );
-    return affectedRows;
+    console.log("sql", sql);
+
+    this.orm.logger.info(`[Model:destroy] Executing query: ${sql}`, { params });
+    try {
+      const [job] = await this.orm.bigquery.createQueryJob({
+        query: sql,
+        params,
+      });
+      await job.getQueryResults();
+      const [metadata] = await job.getMetadata();
+      const affectedRows = Number(
+        metadata.statistics?.query?.numDmlAffectedRows || 0
+      );
+      this.orm.logger.info(
+        `[Model:destroy] Deleted ${affectedRows} records for ${this.name}`
+      );
+      return affectedRows;
+    } catch (error: any) {
+      this.orm.logger.error(
+        `[Model:destroy] Failed to delete records for ${this.name}`,
+        {
+          error: error.message,
+          stack: error.stack,
+          sql,
+          params,
+        }
+      );
+      throw error;
+    }
   }
 
   static async increment(
@@ -385,6 +652,24 @@ export abstract class Model {
       { fields, options }
     );
     return this.increment(fields, { ...options, by: -(options.by || 1) });
+  }
+
+  static async truncate(): Promise<void> {
+    this.orm.logger.info(`[Model:truncate] Truncating table for ${this.name}`);
+    if (this.orm.config.freeTierMode) {
+      this.orm.logger.error(
+        "[Model:truncate] Free tier mode: TRUNCATE not allowed."
+      );
+      throw new Error("Free tier mode: TRUNCATE not allowed.");
+    }
+    const sql = `TRUNCATE TABLE \`${this.orm.config.dataset}.${this.tableName}\``;
+    await this.orm.bigquery.query(sql);
+    this.orm.logger.info(`[Model:truncate] Table truncated for ${this.name}`);
+  }
+
+  static async describe(): Promise<Record<string, DataType>> {
+    this.orm.logger.info(`[Model:describe] Describing table for ${this.name}`);
+    return { ...this.attributes };
   }
 
   private static buildSelectQuery(
@@ -482,7 +767,11 @@ export abstract class Model {
       }
     }
 
-    sql = `SELECT ${selectClause.join(", ")} ${sql}`;
+    if (options.distinct) {
+      sql = `SELECT DISTINCT ${selectClause.join(", ")} ${sql}`;
+    } else {
+      sql = `SELECT ${selectClause.join(", ")} ${sql}`;
+    }
 
     if (options.group) {
       sql += ` GROUP BY ${options.group.map((g) => `\`${g}\``).join(", ")}`;

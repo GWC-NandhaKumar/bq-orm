@@ -64,6 +64,10 @@ export class BigQueryORM {
     );
   }
 
+  get dataset(): string {
+    return this.config.dataset;
+  }
+
   async createDataset(
     options: { location?: string; labels?: Record<string, string> } = {}
   ): Promise<void> {

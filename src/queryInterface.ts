@@ -5,6 +5,12 @@ import { DataType } from "./dataTypes";
 import { dataTypeToSchemaField } from "./utils";
 
 export class QueryInterface {
+  QueryTypes = {
+    SELECT: "SELECT",
+    INSERT: "INSERT",
+    UPDATE: "UPDATE",
+    DELETE: "DELETE",
+  };
   constructor(private orm: BigQueryORM) {}
 
   private dataTypeToString(type: DataType): string {
