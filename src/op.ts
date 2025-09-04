@@ -1,4 +1,4 @@
-// op.ts
+// src/op.ts
 export const Op = {
   eq: "=",
   ne: "!=",

@@ -153,55 +153,73 @@ export abstract class Model {
     );
   }
 
-  static async findAll(options: FindOptions = {}): Promise<any[]> {
-    const { sql, params } = this.buildSelectQuery(options);
-    this.orm.logger.info(`[Model:findAll] Executing query for ${this.name}`, {
-      sql,
-      params,
-    });
+  static async findAll(
+    dataset: string,
+    options: FindOptions = {}
+  ): Promise<any[]> {
+    const { sql, params } = this.buildSelectQuery(dataset, options);
+    this.orm.logger.info(
+      `[Model:findAll] Executing query for ${this.name} in dataset ${dataset}`,
+      {
+        sql,
+        params,
+      }
+    );
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const result = options.raw
       ? rows
       : this.nestAssociations(rows, options.include || []);
     this.orm.logger.info(
-      `[Model:findAll] Found ${result.length} records for ${this.name}`
+      `[Model:findAll] Found ${result.length} records for ${this.name} in dataset ${dataset}`
     );
     return result;
   }
 
-  static async findOne(options: FindOptions = {}): Promise<any | null> {
+  static async findOne(
+    dataset: string,
+    options: FindOptions = {}
+  ): Promise<any | null> {
     this.orm.logger.info(
-      `[Model:findOne] Finding one record for ${this.name}`,
+      `[Model:findOne] Finding one record for ${this.name} in dataset ${dataset}`,
       { options }
     );
-    const results = await this.findAll({ ...options, limit: 1 });
+    const results = await this.findAll(dataset, { ...options, limit: 1 });
     const result = results[0] || null;
     this.orm.logger.info(
-      `[Model:findOne] Found record: ${result ? "yes" : "no"} for ${this.name}`
+      `[Model:findOne] Found record: ${result ? "yes" : "no"} for ${
+        this.name
+      } in dataset ${dataset}`
     );
     return result;
   }
 
   static async findByPk(
+    dataset: string,
     pk: any,
     options: FindOptions = {}
   ): Promise<any | null> {
-    this.orm.logger.info(`[Model:findByPk] Finding by PK for ${this.name}`, {
-      pk,
-      options,
+    this.orm.logger.info(
+      `[Model:findByPk] Finding by PK for ${this.name} in dataset ${dataset}`,
+      {
+        pk,
+        options,
+      }
+    );
+    return this.findOne(dataset, {
+      ...options,
+      where: { [this.primaryKey]: pk },
     });
-    return this.findOne({ ...options, where: { [this.primaryKey]: pk } });
   }
 
   static async findAndCountAll(
+    dataset: string,
     options: FindOptions = {}
   ): Promise<FindAndCountAllResult> {
     this.orm.logger.info(
-      `[Model:findAndCountAll] Finding and counting records for ${this.name}`,
+      `[Model:findAndCountAll] Finding and counting records for ${this.name} in dataset ${dataset}`,
       { options }
     );
 
-    const dataset = this.orm.config.dataset;
     const mainAlias = this.tableName;
     const selectClause: string[] = [];
     const params: Record<string, any> = {};
@@ -329,103 +347,116 @@ export abstract class Model {
     const count = rows[0]?.total_count || 0;
 
     this.orm.logger.info(
-      `[Model:findAndCountAll] Found ${resultRows.length} rows with total count ${count} for ${this.name}`
+      `[Model:findAndCountAll] Found ${resultRows.length} rows with total count ${count} for ${this.name} in dataset ${dataset}`
     );
 
     return { rows: resultRows, count };
   }
 
-  static async count(options: FindOptions = {}): Promise<number> {
-    this.orm.logger.info(`[Model:count] Counting records for ${this.name}`, {
-      options,
-    });
+  static async count(
+    dataset: string,
+    options: FindOptions = {}
+  ): Promise<number> {
+    this.orm.logger.info(
+      `[Model:count] Counting records for ${this.name} in dataset ${dataset}`,
+      {
+        options,
+      }
+    );
     const select = `COUNT(DISTINCT \`${this.tableName}\`.\`${this.primaryKey}\`) AS count`;
-    const { sql, params } = this.buildSelectQuery(options, select);
+    const { sql, params } = this.buildSelectQuery(dataset, options, select);
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const count = rows[0]?.count || 0;
     this.orm.logger.info(
-      `[Model:count] Counted ${count} records for ${this.name}`
+      `[Model:count] Counted ${count} records for ${this.name} in dataset ${dataset}`
     );
     return count;
   }
 
   static async max(
+    dataset: string,
     field: string,
     options: FindOptions = {}
   ): Promise<number | null> {
     this.orm.logger.info(
-      `[Model:max] Getting max value for field ${field} in ${this.name}`,
+      `[Model:max] Getting max value for field ${field} in ${this.name} in dataset ${dataset}`,
       {
         field,
         options,
       }
     );
     const select = `MAX(\`${this.tableName}\`.\`${field}\`) AS max_value`;
-    const { sql, params } = this.buildSelectQuery(options, select);
+    const { sql, params } = this.buildSelectQuery(dataset, options, select);
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const maxValue = rows[0]?.max_value || null;
     this.orm.logger.info(
-      `[Model:max] Max value for ${field}: ${maxValue} in ${this.name}`
+      `[Model:max] Max value for ${field}: ${maxValue} in ${this.name} in dataset ${dataset}`
     );
     return maxValue;
   }
 
   static async min(
+    dataset: string,
     field: string,
     options: FindOptions = {}
   ): Promise<number | null> {
     this.orm.logger.info(
-      `[Model:min] Getting min value for field ${field} in ${this.name}`,
+      `[Model:min] Getting min value for field ${field} in ${this.name} in dataset ${dataset}`,
       {
         field,
         options,
       }
     );
     const select = `MIN(\`${this.tableName}\`.\`${field}\`) AS min_value`;
-    const { sql, params } = this.buildSelectQuery(options, select);
+    const { sql, params } = this.buildSelectQuery(dataset, options, select);
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const minValue = rows[0]?.min_value || null;
     this.orm.logger.info(
-      `[Model:min] Min value for ${field}: ${minValue} in ${this.name}`
+      `[Model:min] Min value for ${field}: ${minValue} in ${this.name} in dataset ${dataset}`
     );
     return minValue;
   }
 
-  static async sum(field: string, options: FindOptions = {}): Promise<number> {
+  static async sum(
+    dataset: string,
+    field: string,
+    options: FindOptions = {}
+  ): Promise<number> {
     this.orm.logger.info(
-      `[Model:sum] Getting sum for field ${field} in ${this.name}`,
+      `[Model:sum] Getting sum for field ${field} in ${this.name} in dataset ${dataset}`,
       {
         field,
         options,
       }
     );
     const select = `SUM(\`${this.tableName}\`.\`${field}\`) AS sum_value`;
-    const { sql, params } = this.buildSelectQuery(options, select);
+    const { sql, params } = this.buildSelectQuery(dataset, options, select);
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const sumValue = rows[0]?.sum_value || 0;
     this.orm.logger.info(
-      `[Model:sum] Sum for ${field}: ${sumValue} in ${this.name}`
+      `[Model:sum] Sum for ${field}: ${sumValue} in ${this.name} in dataset ${dataset}`
     );
     return sumValue;
   }
 
   static async average(
+    dataset: string,
     field: string,
     options: FindOptions = {}
   ): Promise<number | null> {
     this.orm.logger.info(
-      `[Model:average] Getting average for field ${field} in ${this.name}`,
+      `[Model:average] Getting average for field ${field} in ${this.name} in dataset ${dataset}`,
       {
         field,
         options,
       }
     );
     const select = `AVG(\`${this.tableName}\`.\`${field}\`) AS avg_value`;
-    const { sql, params } = this.buildSelectQuery(options, select);
+    const { sql, params } = this.buildSelectQuery(dataset, options, select);
     const [rows] = await this.orm.bigquery.query({ query: sql, params });
     const avgValue = rows[0]?.avg_value || null;
     this.orm.logger.info(
-      `[Model:average] Average for ${field}: ${avgValue} in ${this.name}`
+      `[Model:average] Average for ${field}: ${avgValue} in ${this.name} in dataset ${dataset}`
     );
     return avgValue;
   }
@@ -439,10 +470,16 @@ export abstract class Model {
     return value;
   }
 
-  static async create(data: Record<string, any>): Promise<any> {
-    this.orm.logger.info(`[Model:create] Creating record for ${this.name}`, {
-      data,
-    });
+  static async create(
+    dataset: string,
+    data: Record<string, any>
+  ): Promise<any> {
+    this.orm.logger.info(
+      `[Model:create] Creating record for ${this.name} in dataset ${dataset}`,
+      {
+        data,
+      }
+    );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:create] Free tier mode: CREATE (INSERT) not allowed."
@@ -457,25 +494,26 @@ export abstract class Model {
         filledData[field] = this.resolveDefault(attr.defaultValue);
       } else if (attr.allowNull === false) {
         this.orm.logger.error(
-          `[Model:create] Missing required field ${field} for ${this.name}`
+          `[Model:create] Missing required field ${field} for ${this.name} in dataset ${dataset}`
         );
         throw new Error(`Missing required field ${field}`);
       }
     }
-    const table = this.orm.bigquery
-      .dataset(this.orm.config.dataset)
-      .table(this.tableName);
+    const table = this.orm.bigquery.dataset(dataset).table(this.tableName);
     await table.insert([filledData]);
-    this.orm.logger.info(`[Model:create] Record created for ${this.name}`);
+    this.orm.logger.info(
+      `[Model:create] Record created for ${this.name} in dataset ${dataset}`
+    );
     return filledData;
   }
 
   static async bulkCreate(
+    dataset: string,
     data: Record<string, any>[],
     options: BulkCreateOptions = {}
   ): Promise<any[]> {
     this.orm.logger.info(
-      `[Model:bulkCreate] Creating ${data.length} records for ${this.name}`
+      `[Model:bulkCreate] Creating ${data.length} records for ${this.name} in dataset ${dataset}`
     );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
@@ -496,7 +534,7 @@ export abstract class Model {
           filled[field] = this.resolveDefault(attr.defaultValue);
         } else if (attr.allowNull === false && options.validate !== false) {
           this.orm.logger.error(
-            `[Model:bulkCreate] Missing required field ${field} in bulk create record for ${this.name}`
+            `[Model:bulkCreate] Missing required field ${field} in bulk create record for ${this.name} in dataset ${dataset}`
           );
           throw new Error(
             `Missing required field ${field} in bulk create record`
@@ -505,24 +543,26 @@ export abstract class Model {
       }
       return filled;
     });
-    const table = this.orm.bigquery
-      .dataset(this.orm.config.dataset)
-      .table(this.tableName);
+    const table = this.orm.bigquery.dataset(dataset).table(this.tableName);
     await table.insert(filledData);
     this.orm.logger.info(
-      `[Model:bulkCreate] ${filledData.length} records created for ${this.name}`
+      `[Model:bulkCreate] ${filledData.length} records created for ${this.name} in dataset ${dataset}`
     );
     return options.returning ? filledData : [];
   }
 
   static async update(
+    dataset: string,
     data: Record<string, any>,
     options: UpdateOptions
   ): Promise<number> {
-    this.orm.logger.info(`[Model:update] Updating records for ${this.name}`, {
-      data,
-      options,
-    });
+    this.orm.logger.info(
+      `[Model:update] Updating records for ${this.name} in dataset ${dataset}`,
+      {
+        data,
+        options,
+      }
+    );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:update] Free tier mode: UPDATE not allowed."
@@ -539,7 +579,7 @@ export abstract class Model {
     const { clause: whereClause, params: whereValues } = buildWhereClause(
       options.where
     );
-    const sql = `UPDATE \`${this.orm.config.dataset}.${
+    const sql = `UPDATE \`${dataset}.${
       this.tableName
     }\` SET ${setClauses} WHERE ${whereClause || "TRUE"}`;
     const allParams = { ...setValues, ...whereValues };
@@ -553,15 +593,21 @@ export abstract class Model {
       metadata.statistics?.query?.numDmlAffectedRows || 0
     );
     this.orm.logger.info(
-      `[Model:update] Updated ${affectedRows} records for ${this.name}`
+      `[Model:update] Updated ${affectedRows} records for ${this.name} in dataset ${dataset}`
     );
     return affectedRows;
   }
 
-  static async destroy(options: DestroyOptions): Promise<number> {
-    this.orm.logger.info(`[Model:destroy] Deleting records for ${this.name}`, {
-      options,
-    });
+  static async destroy(
+    dataset: string,
+    options: DestroyOptions
+  ): Promise<number> {
+    this.orm.logger.info(
+      `[Model:destroy] Deleting records for ${this.name} in dataset ${dataset}`,
+      {
+        options,
+      }
+    );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:destroy] Free tier mode: DESTROY (DELETE) not allowed."
@@ -569,12 +615,14 @@ export abstract class Model {
       throw new Error("Free tier mode: DESTROY (DELETE) not allowed.");
     }
     const { clause, params } = buildWhereClause(options.where);
-    const sql = `DELETE FROM \`${this.orm.config.dataset}.${
-      this.tableName
-    }\` WHERE ${clause || "TRUE"}`;
-    console.log("sql", sql);
+    const sql = `DELETE FROM \`${dataset}.${this.tableName}\` WHERE ${
+      clause || "TRUE"
+    }`;
 
-    this.orm.logger.info(`[Model:destroy] Executing query: ${sql}`, { params });
+    this.orm.logger.info(
+      `[Model:destroy] Executing query: ${sql} in dataset ${dataset}`,
+      { params }
+    );
     try {
       const [job] = await this.orm.bigquery.createQueryJob({
         query: sql,
@@ -586,12 +634,12 @@ export abstract class Model {
         metadata.statistics?.query?.numDmlAffectedRows || 0
       );
       this.orm.logger.info(
-        `[Model:destroy] Deleted ${affectedRows} records for ${this.name}`
+        `[Model:destroy] Deleted ${affectedRows} records for ${this.name} in dataset ${dataset}`
       );
       return affectedRows;
     } catch (error: any) {
       this.orm.logger.error(
-        `[Model:destroy] Failed to delete records for ${this.name}`,
+        `[Model:destroy] Failed to delete records for ${this.name} in dataset ${dataset}`,
         {
           error: error.message,
           stack: error.stack,
@@ -604,11 +652,12 @@ export abstract class Model {
   }
 
   static async increment(
+    dataset: string,
     fields: string | string[],
     options: { by?: number; where: WhereOptions }
   ): Promise<number> {
     this.orm.logger.info(
-      `[Model:increment] Incrementing fields for ${this.name}`,
+      `[Model:increment] Incrementing fields for ${this.name} in dataset ${dataset}`,
       { fields, options }
     );
     if (this.orm.config.freeTierMode) {
@@ -625,7 +674,7 @@ export abstract class Model {
     const { clause: whereClause, params: whereValues } = buildWhereClause(
       options.where
     );
-    const sql = `UPDATE \`${this.orm.config.dataset}.${
+    const sql = `UPDATE \`${dataset}.${
       this.tableName
     }\` SET ${setClauses} WHERE ${whereClause || "TRUE"}`;
     const [job] = await this.orm.bigquery.createQueryJob({
@@ -638,33 +687,41 @@ export abstract class Model {
       metadata.statistics?.query?.numDmlAffectedRows || 0
     );
     this.orm.logger.info(
-      `[Model:increment] Incremented ${affectedRows} records for ${this.name}`
+      `[Model:increment] Incremented ${affectedRows} records for ${this.name} in dataset ${dataset}`
     );
     return affectedRows;
   }
 
   static async decrement(
+    dataset: string,
     fields: string | string[],
     options: { by?: number; where: WhereOptions }
   ): Promise<number> {
     this.orm.logger.info(
-      `[Model:decrement] Decrementing fields for ${this.name}`,
+      `[Model:decrement] Decrementing fields for ${this.name} in dataset ${dataset}`,
       { fields, options }
     );
-    return this.increment(fields, { ...options, by: -(options.by || 1) });
+    return this.increment(dataset, fields, {
+      ...options,
+      by: -(options.by || 1),
+    });
   }
 
-  static async truncate(): Promise<void> {
-    this.orm.logger.info(`[Model:truncate] Truncating table for ${this.name}`);
+  static async truncate(dataset: string): Promise<void> {
+    this.orm.logger.info(
+      `[Model:truncate] Truncating table for ${this.name} in dataset ${dataset}`
+    );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:truncate] Free tier mode: TRUNCATE not allowed."
       );
       throw new Error("Free tier mode: TRUNCATE not allowed.");
     }
-    const sql = `TRUNCATE TABLE \`${this.orm.config.dataset}.${this.tableName}\``;
+    const sql = `TRUNCATE TABLE \`${dataset}.${this.tableName}\``;
     await this.orm.bigquery.query(sql);
-    this.orm.logger.info(`[Model:truncate] Table truncated for ${this.name}`);
+    this.orm.logger.info(
+      `[Model:truncate] Table truncated for ${this.name} in dataset ${dataset}`
+    );
   }
 
   static async describe(): Promise<Record<string, DataType>> {
@@ -673,14 +730,14 @@ export abstract class Model {
   }
 
   private static buildSelectQuery(
+    dataset: string,
     options: FindOptions,
     selectOverride?: string
   ): { sql: string; params: Record<string, any> } {
     this.orm.logger.info(
-      `[Model:buildSelectQuery] Building query for ${this.name}`,
+      `[Model:buildSelectQuery] Building query for ${this.name} in dataset ${dataset}`,
       { options, selectOverride }
     );
-    const dataset = this.orm.config.dataset;
     const mainAlias = this.tableName;
     let sql = `FROM \`${dataset}.${this.tableName}\` AS \`${mainAlias}\``;
     const params: Record<string, any> = {};
@@ -791,7 +848,7 @@ export abstract class Model {
     }
 
     this.orm.logger.info(
-      `[Model:buildSelectQuery] Generated SQL for ${this.name}`,
+      `[Model:buildSelectQuery] Generated SQL for ${this.name} in dataset ${dataset}`,
       { sql, params }
     );
     return { sql, params };

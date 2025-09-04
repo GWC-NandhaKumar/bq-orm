@@ -7,12 +7,9 @@ import { DataType, DataTypes } from "./dataTypes";
 import { QueryInterface } from "./queryInterface";
 import { dataTypeToSchemaField } from "./utils";
 import { createLogger, Logger } from "./logger";
-import * as readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 
 export interface BigQueryORMConfig {
   projectId: string;
-  dataset: string;
   keyFilename?: string;
   logging?: boolean;
   freeTierMode?: boolean;
@@ -37,8 +34,6 @@ export class BigQueryORM {
 
     this.config = {
       projectId: config?.projectId || process.env.GOOGLE_CLOUD_PROJECT || "",
-      dataset:
-        config?.dataset || process.env.BIGQUERY_DATASET || "default_dataset",
       keyFilename:
         config?.keyFilename || process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
       logging,
@@ -64,52 +59,42 @@ export class BigQueryORM {
     );
   }
 
-  get dataset(): string {
-    return this.config.dataset;
-  }
-
   async createDataset(
+    dataset: string,
     options: { location?: string; labels?: Record<string, string> } = {}
   ): Promise<void> {
     this.logger.info("[BigQueryORM:createDataset] Starting dataset creation", {
+      dataset,
       options,
     });
-    if (!this.config.dataset || this.config.dataset === "default_dataset") {
-      this.logger.info(
-        "[BigQueryORM:createDataset] No dataset name provided or default used; prompting for input"
+    if (!dataset) {
+      this.logger.error(
+        "[BigQueryORM:createDataset] Dataset name must be provided"
       );
-      const rl = readline.createInterface({ input, output });
-      this.config.dataset = await rl.question(
-        "Enter the dataset name to create: "
-      );
-      rl.close();
-      this.logger.info(
-        "[BigQueryORM:createDataset] Dataset name set from prompt",
-        { dataset: this.config.dataset }
-      );
+      throw new Error("Dataset name must be provided");
     }
 
-    const dataset = this.bigquery.dataset(this.config.dataset);
-    const [dsExists] = await dataset.exists();
+    const ds = this.bigquery.dataset(dataset);
+    const [dsExists] = await ds.exists();
     if (dsExists) {
       this.logger.info(
-        `[BigQueryORM:createDataset] Dataset ${this.config.dataset} already exists, skipping creation`
+        `[BigQueryORM:createDataset] Dataset ${dataset} already exists, skipping creation`
       );
       return;
     }
 
     try {
-      await dataset.create({
+      await ds.create({
         location: options.location,
         labels: options.labels,
       });
       this.logger.info(
-        `[BigQueryORM:createDataset] Created dataset ${this.config.dataset}`,
+        `[BigQueryORM:createDataset] Created dataset ${dataset}`,
         options
       );
     } catch (err: any) {
       this.logger.error(
-        `[BigQueryORM:createDataset] Failed to create dataset ${this.config.dataset}:`,
+        `[BigQueryORM:createDataset] Failed to create dataset ${dataset}:`,
         err.message
       );
       throw err;
@@ -214,9 +199,10 @@ export class BigQueryORM {
   }
 
   async sync(
+    dataset: string,
     options: { force?: boolean; alter?: boolean } = {}
   ): Promise<void> {
-    this.logger.info("[BigQueryORM:sync] Starting sync", { options });
+    this.logger.info("[BigQueryORM:sync] Starting sync", { dataset, options });
     const { force = false, alter = false } = options;
     if (this.config.freeTierMode && (force || alter)) {
       this.logger.warn(
@@ -224,28 +210,38 @@ export class BigQueryORM {
       );
     }
 
-    const dataset = this.bigquery.dataset(this.config.dataset);
-    const [dsExists] = await dataset.exists();
+    const ds = this.bigquery.dataset(dataset);
+    const [dsExists] = await ds.exists();
     if (!dsExists) {
-      await dataset.create();
-      this.logger.info(
-        `[BigQueryORM:sync] Created dataset ${this.config.dataset}`
-      );
+      await ds.create();
+      this.logger.info(`[BigQueryORM:sync] Created dataset ${dataset}`);
     }
 
     for (const model of Object.values(this.models)) {
-      const table = dataset.table(model.tableName);
+      const table = ds.table(model.tableName);
       const [tExists] = await table.exists();
       if (tExists && force) {
         await table.delete();
-        this.logger.info(`[BigQueryORM:sync] Deleted table ${model.tableName}`);
+        this.logger.info(
+          `[BigQueryORM:sync] Deleted table ${model.tableName} in dataset ${dataset}`
+        );
       }
       if (!tExists || force) {
         const schema = Object.entries(model.attributes).map(([name, type]) =>
           dataTypeToSchemaField(name, type)
         );
-        await table.create({ schema });
-        this.logger.info(`[BigQueryORM:sync] Created table ${model.tableName}`);
+        const createOptions: any = { schema };
+        // Add clustering for primary key to optimize queries (BigQuery's equivalent to indexing)
+        if (model.primaryKey) {
+          createOptions.clustering = { fields: [model.primaryKey] };
+          this.logger.info(
+            `[BigQueryORM:sync] Clustering table ${model.tableName} by primary key ${model.primaryKey} in dataset ${dataset}`
+          );
+        }
+        await table.create(createOptions);
+        this.logger.info(
+          `[BigQueryORM:sync] Created table ${model.tableName} in dataset ${dataset}`
+        );
       } else if (alter) {
         this.logger.warn(
           "[BigQueryORM:sync] Alter sync not supported in free tier; manual migration recommended."
@@ -261,8 +257,9 @@ export class BigQueryORM {
     return this.queryInterface;
   }
 
-  async runMigrations(migrationsPath: string): Promise<void> {
+  async runMigrations(dataset: string, migrationsPath: string): Promise<void> {
     this.logger.info("[BigQueryORM:runMigrations] Starting migrations", {
+      dataset,
       migrationsPath,
     });
     if (this.config.freeTierMode) {
@@ -271,16 +268,16 @@ export class BigQueryORM {
       );
     }
 
-    const dataset = this.bigquery.dataset(this.config.dataset);
-    let [dsExists] = await dataset.exists();
+    const ds = this.bigquery.dataset(dataset);
+    let [dsExists] = await ds.exists();
     if (!dsExists) {
-      await dataset.create();
+      await ds.create();
       this.logger.info(
-        `[BigQueryORM:runMigrations] Created dataset ${this.config.dataset}`
+        `[BigQueryORM:runMigrations] Created dataset ${dataset}`
       );
     }
 
-    const metaTable = dataset.table("migrations");
+    const metaTable = ds.table("migrations");
     let [tExists] = await metaTable.exists();
     if (!tExists && !this.config.freeTierMode) {
       await metaTable.create({
@@ -289,7 +286,9 @@ export class BigQueryORM {
           { name: "executed_at", type: "TIMESTAMP" },
         ],
       });
-      this.logger.info("[BigQueryORM:runMigrations] Created migrations table");
+      this.logger.info(
+        "[BigQueryORM:runMigrations] Created migrations table in dataset ${dataset}"
+      );
     }
 
     let executed: Set<string>;
@@ -300,7 +299,7 @@ export class BigQueryORM {
       );
     } else {
       const [rows] = await this.bigquery.query({
-        query: `SELECT name FROM \`${this.config.projectId}.${this.config.dataset}.migrations\` ORDER BY executed_at ASC`,
+        query: `SELECT name FROM \`${this.config.projectId}.${dataset}.migrations\` ORDER BY executed_at ASC`,
       });
       executed = new Set(rows.map((r: any) => r.name));
       this.logger.info(
@@ -330,14 +329,14 @@ export class BigQueryORM {
 
       const migrationModule = await import(path.resolve(migrationsPath, file));
       const migration = migrationModule.default || migrationModule;
-      await migration.up(this.queryInterface, this);
+      await migration.up(this.queryInterface, this, dataset);
       if (this.config.freeTierMode) {
         this.executedMigrations.add(migrationName);
         this.logger.info(
           `[BigQueryORM:runMigrations] Migration ${migrationName} tracked in-memory`
         );
       } else {
-        const sql = `INSERT INTO \`${this.config.projectId}.${this.config.dataset}.migrations\` (name, executed_at) VALUES (@name, @executed_at)`;
+        const sql = `INSERT INTO \`${this.config.projectId}.${dataset}.migrations\` (name, executed_at) VALUES (@name, @executed_at)`;
         await this.bigquery.query({
           query: sql,
           params: {
@@ -346,16 +345,19 @@ export class BigQueryORM {
           },
         });
         this.logger.info(
-          `[BigQueryORM:runMigrations] Migration ${migrationName} executed and recorded`
+          `[BigQueryORM:runMigrations] Migration ${migrationName} executed and recorded in dataset ${dataset}`
         );
       }
     }
   }
 
-  async revertLastMigration(migrationsPath: string): Promise<void> {
+  async revertLastMigration(
+    dataset: string,
+    migrationsPath: string
+  ): Promise<void> {
     this.logger.info(
       "[BigQueryORM:revertLastMigration] Starting revert last migration",
-      { migrationsPath }
+      { dataset, migrationsPath }
     );
     if (this.config.freeTierMode) {
       this.logger.warn(
@@ -364,11 +366,9 @@ export class BigQueryORM {
       return;
     }
 
-    const metaTable = this.bigquery
-      .dataset(this.config.dataset)
-      .table("migrations");
+    const metaTable = this.bigquery.dataset(dataset).table("migrations");
     const [rows] = await this.bigquery.query({
-      query: `SELECT name FROM \`${this.config.projectId}.${this.config.dataset}.migrations\` ORDER BY executed_at DESC LIMIT 1`,
+      query: `SELECT name FROM \`${this.config.projectId}.${dataset}.migrations\` ORDER BY executed_at DESC LIMIT 1`,
     });
     if (!rows.length) {
       this.logger.info(
@@ -398,23 +398,28 @@ export class BigQueryORM {
       path.resolve(migrationsPath, migrationFile)
     );
     const migration = migrationModule.default || migrationModule;
-    await migration.down(this.queryInterface, this);
-    const sql = `DELETE FROM \`${this.config.projectId}.${this.config.dataset}.migrations\` WHERE name = @migrationName`;
+    await migration.down(this.queryInterface, this, dataset);
+    const sql = `DELETE FROM \`${this.config.projectId}.${dataset}.migrations\` WHERE name = @migrationName`;
     await this.bigquery.query({ query: sql, params: { migrationName } });
     this.logger.info(
-      `[BigQueryORM:revertLastMigration] Reverted migration ${migrationName}`
+      `[BigQueryORM:revertLastMigration] Reverted migration ${migrationName} in dataset ${dataset}`
     );
   }
 
-  async transaction(fn: (qi: QueryInterface) => Promise<void>): Promise<void> {
-    this.logger.info("[BigQueryORM:transaction] Starting transaction");
+  async transaction(
+    dataset: string,
+    fn: (qi: QueryInterface, dataset: string) => Promise<void>
+  ): Promise<void> {
+    this.logger.info("[BigQueryORM:transaction] Starting transaction", {
+      dataset,
+    });
     if (this.config.freeTierMode) {
       this.logger.warn(
         "[BigQueryORM:transaction] Free tier mode: Transactions limited to SELECT queries."
       );
     }
     try {
-      await fn(this.queryInterface);
+      await fn(this.queryInterface, dataset);
       this.logger.info("[BigQueryORM:transaction] Transaction successful");
     } catch (err: any) {
       this.logger.error(

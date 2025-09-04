@@ -36,11 +36,17 @@ export class QueryInterface {
   }
 
   async createTable(
+    dataset: string,
     tableName: string,
     attributes: Record<string, DataType>,
-    options: { partitionBy?: string; clusterBy?: string[] } = {}
+    options: {
+      partitionBy?: string;
+      clusterBy?: string[];
+      primaryKey?: string;
+    } = {}
   ): Promise<void> {
     this.orm.logger.info("[QueryInterface:createTable] Starting createTable", {
+      dataset,
       tableName,
       attributes: Object.keys(attributes),
       options,
@@ -50,19 +56,19 @@ export class QueryInterface {
         "[QueryInterface:createTable] Free tier mode: Table creation counts toward 10GB storage limit."
       );
     }
-    const dataset = this.orm.bigquery.dataset(this.orm.config.dataset);
-    const [dsExists] = await dataset.exists();
+    const ds = this.orm.bigquery.dataset(dataset);
+    const [dsExists] = await ds.exists();
     if (!dsExists) {
-      await dataset.create();
+      await ds.create();
       this.orm.logger.info(
-        `[QueryInterface:createTable] Created dataset ${this.orm.config.dataset}`
+        `[QueryInterface:createTable] Created dataset ${dataset}`
       );
     }
-    const table = dataset.table(tableName);
+    const table = ds.table(tableName);
     const [tExists] = await table.exists();
     if (tExists) {
       this.orm.logger.info(
-        `[QueryInterface:createTable] Table ${tableName} already exists, skipping creation`
+        `[QueryInterface:createTable] Table ${tableName} already exists in dataset ${dataset}, skipping creation`
       );
       return;
     }
@@ -76,17 +82,24 @@ export class QueryInterface {
         field: options.partitionBy,
       };
     }
-    if (options.clusterBy) {
+    // Add clustering for primary key if provided (BigQuery's index equivalent)
+    if (options.primaryKey) {
+      createOptions.clustering = { fields: [options.primaryKey] };
+      this.orm.logger.info(
+        `[QueryInterface:createTable] Clustering table ${tableName} by primary key ${options.primaryKey} in dataset ${dataset}`
+      );
+    } else if (options.clusterBy) {
       createOptions.clustering = { fields: options.clusterBy };
     }
     await table.create(createOptions);
     this.orm.logger.info(
-      `[QueryInterface:createTable] Created table ${tableName}`
+      `[QueryInterface:createTable] Created table ${tableName} in dataset ${dataset}`
     );
   }
 
-  async dropTable(tableName: string): Promise<void> {
+  async dropTable(dataset: string, tableName: string): Promise<void> {
     this.orm.logger.info("[QueryInterface:dropTable] Starting dropTable", {
+      dataset,
       tableName,
     });
     if (this.orm.config.freeTierMode) {
@@ -94,28 +107,28 @@ export class QueryInterface {
         "[QueryInterface:dropTable] Free tier mode: Table deletion counts toward storage changes."
       );
     }
-    const table = this.orm.bigquery
-      .dataset(this.orm.config.dataset)
-      .table(tableName);
+    const table = this.orm.bigquery.dataset(dataset).table(tableName);
     const [exists] = await table.exists();
     if (!exists) {
       this.orm.logger.info(
-        `[QueryInterface:dropTable] Table ${tableName} does not exist, skipping deletion`
+        `[QueryInterface:dropTable] Table ${tableName} does not exist in dataset ${dataset}, skipping deletion`
       );
       return;
     }
     await table.delete();
     this.orm.logger.info(
-      `[QueryInterface:dropTable] Deleted table ${tableName}`
+      `[QueryInterface:dropTable] Deleted table ${tableName} in dataset ${dataset}`
     );
   }
 
   async addColumn(
+    dataset: string,
     tableName: string,
     columnName: string,
     type: DataType
   ): Promise<void> {
     this.orm.logger.info("[QueryInterface:addColumn] Starting addColumn", {
+      dataset,
       tableName,
       columnName,
       type,
@@ -128,17 +141,21 @@ export class QueryInterface {
     }
     const dataTypeStr = this.dataTypeToString(type);
     const notNull = type.allowNull === false ? " NOT NULL" : "";
-    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` ADD COLUMN \`${columnName}\` ${dataTypeStr}${notNull}`;
+    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${dataset}.${tableName}\` ADD COLUMN \`${columnName}\` ${dataTypeStr}${notNull}`;
     await this.orm.bigquery.query(sql);
     this.orm.logger.info(
-      `[QueryInterface:addColumn] Added column ${columnName} to ${tableName}`
+      `[QueryInterface:addColumn] Added column ${columnName} to ${tableName} in dataset ${dataset}`
     );
   }
 
-  async removeColumn(tableName: string, columnName: string): Promise<void> {
+  async removeColumn(
+    dataset: string,
+    tableName: string,
+    columnName: string
+  ): Promise<void> {
     this.orm.logger.info(
       "[QueryInterface:removeColumn] Starting removeColumn",
-      { tableName, columnName }
+      { dataset, tableName, columnName }
     );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
@@ -146,21 +163,22 @@ export class QueryInterface {
       );
       throw new Error("Free tier mode: DROP COLUMN (DML) not allowed.");
     }
-    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` DROP COLUMN IF EXISTS \`${columnName}\``;
+    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${dataset}.${tableName}\` DROP COLUMN IF EXISTS \`${columnName}\``;
     await this.orm.bigquery.query(sql);
     this.orm.logger.info(
-      `[QueryInterface:removeColumn] Removed column ${columnName} from ${tableName}`
+      `[QueryInterface:removeColumn] Removed column ${columnName} from ${tableName} in dataset ${dataset}`
     );
   }
 
   async renameColumn(
+    dataset: string,
     tableName: string,
     oldColumnName: string,
     newColumnName: string
   ): Promise<void> {
     this.orm.logger.info(
       "[QueryInterface:renameColumn] Starting renameColumn",
-      { tableName, oldColumnName, newColumnName }
+      { dataset, tableName, oldColumnName, newColumnName }
     );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
@@ -168,21 +186,22 @@ export class QueryInterface {
       );
       throw new Error("Free tier mode: RENAME COLUMN (DML) not allowed.");
     }
-    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` RENAME COLUMN \`${oldColumnName}\` TO \`${newColumnName}\``;
+    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${dataset}.${tableName}\` RENAME COLUMN \`${oldColumnName}\` TO \`${newColumnName}\``;
     await this.orm.bigquery.query(sql);
     this.orm.logger.info(
-      `[QueryInterface:renameColumn] Renamed column ${oldColumnName} to ${newColumnName} in ${tableName}`
+      `[QueryInterface:renameColumn] Renamed column ${oldColumnName} to ${newColumnName} in ${tableName} in dataset ${dataset}`
     );
   }
 
   async changeColumn(
+    dataset: string,
     tableName: string,
     columnName: string,
     type: DataType
   ): Promise<void> {
     this.orm.logger.info(
       "[QueryInterface:changeColumn] Starting changeColumn",
-      { tableName, columnName, type }
+      { dataset, tableName, columnName, type }
     );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
@@ -191,17 +210,21 @@ export class QueryInterface {
       throw new Error("Free tier mode: ALTER COLUMN (DML) not allowed.");
     }
     const dataTypeStr = this.dataTypeToString(type);
-    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${this.orm.config.dataset}.${tableName}\` ALTER COLUMN \`${columnName}\` SET DATA TYPE ${dataTypeStr}`;
+    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${dataset}.${tableName}\` ALTER COLUMN \`${columnName}\` SET DATA TYPE ${dataTypeStr}`;
     await this.orm.bigquery.query(sql);
     this.orm.logger.info(
-      `[QueryInterface:changeColumn] Changed column ${columnName} type in ${tableName}`
+      `[QueryInterface:changeColumn] Changed column ${columnName} type in ${tableName} in dataset ${dataset}`
     );
   }
 
-  async addPartition(tableName: string, partitionBy: string): Promise<void> {
+  async addPartition(
+    dataset: string,
+    tableName: string,
+    partitionBy: string
+  ): Promise<void> {
     this.orm.logger.info(
       "[QueryInterface:addPartition] Starting addPartition",
-      { tableName, partitionBy }
+      { dataset, tableName, partitionBy }
     );
     this.orm.logger.warn(
       "[QueryInterface:addPartition] Partitioning requires table recreation."
@@ -218,29 +241,34 @@ export class QueryInterface {
     );
   }
 
-  async addClustering(tableName: string, clusterBy: string[]): Promise<void> {
+  async addClustering(
+    dataset: string,
+    tableName: string,
+    clusterBy: string[]
+  ): Promise<void> {
     this.orm.logger.info(
       "[QueryInterface:addClustering] Starting addClustering",
-      { tableName, clusterBy }
+      { dataset, tableName, clusterBy }
     );
     if (this.orm.config.freeTierMode) {
       this.orm.logger.warn(
         "[QueryInterface:addClustering] Free tier mode: Clustering may incur query costs."
       );
     }
-    const sql = `ALTER TABLE \`${this.orm.config.projectId}.${
-      this.orm.config.dataset
-    }.${tableName}\` SET OPTIONS (clustering_fields = '${JSON.stringify(
+    const sql = `ALTER TABLE \`${
+      this.orm.config.projectId
+    }.${dataset}.${tableName}\` SET OPTIONS (clustering_fields = '${JSON.stringify(
       clusterBy
     )}')`;
     await this.orm.bigquery.query(sql);
     this.orm.logger.info(
-      `[QueryInterface:addClustering] Added clustering to ${tableName}`
+      `[QueryInterface:addClustering] Added clustering to ${tableName} in dataset ${dataset}`
     );
   }
 
-  async query(sql: string, params?: any): Promise<any> {
+  async query(dataset: string, sql: string, params?: any): Promise<any> {
     this.orm.logger.info("[QueryInterface:query] Starting query execution", {
+      dataset,
       sql,
       params,
     });
@@ -255,7 +283,7 @@ export class QueryInterface {
     }
     const result = await this.orm.bigquery.query({ query: sql, params });
     this.orm.logger.info(
-      `[QueryInterface:query] Executed query successfully for ${this.orm.config.dataset}`
+      `[QueryInterface:query] Executed query successfully for dataset ${dataset}`
     );
     return result;
   }
