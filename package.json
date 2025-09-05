@@ -1,5 +1,5 @@
 {
-  "name": "bq-orm",
+  "name": "orm-bq",
   "version": "1.0.1",
   "description": "A Sequelize-inspired ORM for Google BigQuery in TypeScript",
   "main": "dist/index.js",

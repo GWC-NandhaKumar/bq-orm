@@ -48,6 +48,7 @@ export interface DataTypes {
   INTERVAL: (options?: Partial<DataTypeAttribute>) => DataType;
   BYTES: (options?: Partial<DataTypeAttribute>) => DataType;
   NOW: string;
+  NOW_DATETIME: string;
   UUIDV4: string;
 }
 
@@ -100,6 +101,9 @@ export const DataTypes: DataTypes = {
     ...options,
   }),
   BYTES: (options = {}) => ({ type: "BYTES", allowNull: true, ...options }),
-  NOW: "CURRENT_TIMESTAMP()",
+
+  // Default value helpers
+  NOW: "CURRENT_TIMESTAMP()", // For TIMESTAMP
+  NOW_DATETIME: "CURRENT_DATETIME()", // For DATETIME
   UUIDV4: "GENERATE_UUID()",
 };

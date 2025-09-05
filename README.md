@@ -1,8 +1,8 @@
-# BigQuery ORM (bq-orm)
+# BigQuery ORM (orm-bq)
 
-[![npm version](https://badge.fury.io/js/bq-orm.svg)](https://badge.fury.io/js/bq-orm) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Build Status](https://travis-ci.org/your-org/bq-orm.svg?branch=main)](https://travis-ci.org/your-org/bq-orm)
+[![npm version](https://badge.fury.io/js/orm-bq.svg)](https://badge.fury.io/js/orm-bq) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Build Status](https://travis-ci.org/your-org/orm-bq.svg?branch=main)](https://travis-ci.org/your-org/orm-bq)
 
-**bq-orm** is a lightweight Object-Relational Mapping (ORM) library for Google BigQuery, inspired by Sequelize but tailored for BigQuery's serverless, columnar database architecture. It simplifies interactions with BigQuery by providing model definitions, associations, migrations, and query interfaces while supporting multi-dataset operations (no global dataset config—pass dataset names dynamically to methods).
+**orm-bq** is a lightweight Object-Relational Mapping (ORM) library for Google BigQuery, inspired by Sequelize but tailored for BigQuery's serverless, columnar database architecture. It simplifies interactions with BigQuery by providing model definitions, associations, migrations, and query interfaces while supporting multi-dataset operations (no global dataset config—pass dataset names dynamically to methods).
 
 This ORM handles schema management, CRUD operations, associations (hasOne, hasMany, belongsTo, belongsToMany), and more. It includes free-tier mode for cost-aware development and logging for debugging.
 
@@ -54,7 +54,7 @@ This ORM handles schema management, CRUD operations, associations (hasOne, hasMa
 Install via npm:
 
 ```bash
-npm install bq-orm
+npm install orm-bq
 ```
 
 Ensure you have Google Cloud credentials set up (e.g., via `GOOGLE_APPLICATION_CREDENTIALS` env var).
@@ -64,7 +64,7 @@ Ensure you have Google Cloud credentials set up (e.g., via `GOOGLE_APPLICATION_C
 Create an instance of `BigQueryORM` with your project config. No dataset is required in config—pass it dynamically.
 
 ```typescript
-import { BigQueryORM } from "bq-orm";
+import { BigQueryORM } from "orm-bq";
 
 const orm = new BigQueryORM({
   projectId: "your-project-id",
@@ -81,7 +81,7 @@ await orm.authenticate(); // Verify connection
 Models extend `Model` and define attributes using `DataTypes`.
 
 ```typescript
-import { DataTypes } from "bq-orm";
+import { DataTypes } from "orm-bq";
 
 const User = orm.define(
   "User",
@@ -366,7 +366,7 @@ Enabled via config or `BIGQUERY_ORM_LOGGING=true` env. Logs operations with cont
 ### Full Setup Example
 
 ```typescript
-import { BigQueryORM, DataTypes } from "bq-orm";
+import { BigQueryORM, DataTypes } from "orm-bq";
 
 const orm = new BigQueryORM({ projectId: "project-id", logging: true });
 await orm.loadModels("./models");
@@ -403,7 +403,7 @@ See migration file above. Run with `orm.runMigrations`.
 ### Query with Operators
 
 ```typescript
-import { Op } from "bq-orm";
+import { Op } from "orm-bq";
 
 await User.findAll("dataset", {
   where: {

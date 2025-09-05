@@ -466,6 +466,12 @@ export abstract class Model {
       return new Date();
     } else if (value === DataTypes.UUIDV4 || value === "GENERATE_UUID()") {
       return crypto.randomUUID();
+    } else if (
+      value === DataTypes.NOW_DATETIME ||
+      value === "CURRENT_DATETIME()"
+    ) {
+      const now = new Date();
+      return now.toISOString().slice(0, 19).replace("T", " ");
     }
     return value;
   }
