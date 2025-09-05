@@ -470,22 +470,50 @@ export abstract class Model {
     return value;
   }
 
+  // Add this helper method to the Model class
+  private static async checkForDuplicatePrimaryKeys(
+    dataset: string,
+    primaryKeyValues: any[]
+  ): Promise<Set<any>> {
+    if (!primaryKeyValues.length) return new Set();
+
+    this.orm.logger.info(
+      `[Model:checkForDuplicatePrimaryKeys] Checking for duplicate primary keys for ${this.name}`,
+      { primaryKeyValues }
+    );
+
+    const paramNames = primaryKeyValues.map((_, index) => `@pk${index}`);
+    const params = primaryKeyValues.reduce((acc, value, index) => {
+      acc[`pk${index}`] = value;
+      return acc;
+    }, {} as Record<string, any>);
+
+    const sql = `SELECT \`${this.primaryKey}\` FROM \`${dataset}.${
+      this.tableName
+    }\` 
+               WHERE \`${this.primaryKey}\` IN (${paramNames.join(", ")})`;
+
+    const [rows] = await this.orm.bigquery.query({ query: sql, params });
+    return new Set(rows.map((row: any) => row[this.primaryKey]));
+  }
+
+  // Update the create method
   static async create(
     dataset: string,
     data: Record<string, any>
   ): Promise<any> {
     this.orm.logger.info(
       `[Model:create] Creating record for ${this.name} in dataset ${dataset}`,
-      {
-        data,
-      }
+      { data }
     );
+
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:create] Free tier mode: CREATE (INSERT) not allowed."
       );
       throw new Error("Free tier mode: CREATE (INSERT) not allowed.");
     }
+
     const filledData: Record<string, any> = {};
     for (const [field, attr] of Object.entries(this.attributes)) {
       if (field in data) {
@@ -499,6 +527,21 @@ export abstract class Model {
         throw new Error(`Missing required field ${field}`);
       }
     }
+
+    // Check for duplicate primary key
+    const primaryKeyValue = filledData[this.primaryKey];
+    if (primaryKeyValue !== undefined && primaryKeyValue !== null) {
+      const existingKeys = await this.checkForDuplicatePrimaryKeys(dataset, [
+        primaryKeyValue,
+      ]);
+      if (existingKeys.has(primaryKeyValue)) {
+        this.orm.logger.error(
+          `[Model:create] Duplicate primary key ${this.primaryKey}=${primaryKeyValue} for ${this.name} in dataset ${dataset}`
+        );
+        throw new Error(`Duplicate primary key value: ${primaryKeyValue}`);
+      }
+    }
+
     const table = this.orm.bigquery.dataset(dataset).table(this.tableName);
     await table.insert([filledData]);
     this.orm.logger.info(
@@ -507,6 +550,7 @@ export abstract class Model {
     return filledData;
   }
 
+  // Update the bulkCreate method
   static async bulkCreate(
     dataset: string,
     data: Record<string, any>[],
@@ -515,16 +559,19 @@ export abstract class Model {
     this.orm.logger.info(
       `[Model:bulkCreate] Creating ${data.length} records for ${this.name} in dataset ${dataset}`
     );
+
     if (this.orm.config.freeTierMode) {
       this.orm.logger.error(
         "[Model:bulkCreate] Free tier mode: BULK CREATE (INSERT) not allowed."
       );
       throw new Error("Free tier mode: BULK CREATE (INSERT) not allowed.");
     }
+
     if (!data.length) {
       this.orm.logger.info("[Model:bulkCreate] No records to create, skipping");
       return [];
     }
+
     const filledData = data.map((record) => {
       const filled: Record<string, any> = {};
       for (const [field, attr] of Object.entries(this.attributes)) {
@@ -543,14 +590,85 @@ export abstract class Model {
       }
       return filled;
     });
-    const table = this.orm.bigquery.dataset(dataset).table(this.tableName);
-    await table.insert(filledData);
-    this.orm.logger.info(
-      `[Model:bulkCreate] ${filledData.length} records created for ${this.name} in dataset ${dataset}`
-    );
-    return options.returning ? filledData : [];
-  }
 
+    // Check for duplicate primary keys in batch
+    const primaryKeyValues = filledData
+      .map((record) => record[this.primaryKey])
+      .filter((value) => value !== undefined && value !== null);
+
+    if (primaryKeyValues.length > 0) {
+      const existingKeys = await this.checkForDuplicatePrimaryKeys(
+        dataset,
+        primaryKeyValues
+      );
+
+      // Check for duplicates within the current batch
+      const batchKeySet = new Set();
+      const duplicatesInBatch: any[] = [];
+
+      for (const record of filledData) {
+        const keyValue = record[this.primaryKey];
+        if (keyValue !== undefined && keyValue !== null) {
+          if (batchKeySet.has(keyValue)) {
+            duplicatesInBatch.push(keyValue);
+          } else {
+            batchKeySet.add(keyValue);
+          }
+        }
+      }
+
+      if (duplicatesInBatch.length > 0) {
+        this.orm.logger.error(
+          `[Model:bulkCreate] Duplicate primary keys within batch: ${duplicatesInBatch.join(
+            ", "
+          )} for ${this.name}`
+        );
+        throw new Error(
+          `Duplicate primary keys within batch: ${duplicatesInBatch.join(", ")}`
+        );
+      }
+
+      // Check against existing records
+      const conflictingKeys = Array.from(existingKeys);
+      if (conflictingKeys.length > 0) {
+        this.orm.logger.error(
+          `[Model:bulkCreate] Duplicate primary keys with existing records: ${conflictingKeys.join(
+            ", "
+          )} for ${this.name}`
+        );
+        throw new Error(
+          `Duplicate primary keys with existing records: ${conflictingKeys.join(
+            ", "
+          )}`
+        );
+      }
+    }
+
+    const table = this.orm.bigquery.dataset(dataset).table(this.tableName);
+
+    // Use batch insertion with error handling
+    try {
+      await table.insert(filledData);
+      this.orm.logger.info(
+        `[Model:bulkCreate] ${filledData.length} records created for ${this.name} in dataset ${dataset}`
+      );
+      return options.returning ? filledData : [];
+    } catch (error: any) {
+      // Handle potential race condition where duplicates might still occur
+      if (
+        (error.message && error.message.includes("duplicate")) ||
+        error.message.includes("already exists")
+      ) {
+        this.orm.logger.error(
+          `[Model:bulkCreate] Race condition detected: duplicates found during insertion for ${this.name}`
+        );
+        throw new Error(
+          "Duplicate primary keys detected during insertion (race condition)"
+        );
+      }
+      throw error;
+    }
+  }
   static async update(
     dataset: string,
     data: Record<string, any>,
