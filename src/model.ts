@@ -226,7 +226,7 @@ export abstract class Model {
     let sql = `FROM \`${dataset}.${this.tableName}\` AS \`${mainAlias}\``;
     const whereClauses: string[] = [];
 
-    // Build select clause for rows
+    // Build main select clause
     const mainAttributes = options.attributes || Object.keys(this.attributes);
     for (const field of mainAttributes) {
       selectClause.push(
@@ -234,21 +234,19 @@ export abstract class Model {
       );
     }
 
-    // Handle includes (associations)
+    // Handle includes
     if (options.include) {
       for (const inc of options.include) {
         const as = inc.as || inc.model.tableName;
         const assoc = Object.values(this.associations).find(
           (a) => a.as === as && a.target === inc.model
         );
-        if (!assoc) {
-          this.orm.logger.error(
-            `[Model:findAndCountAll] Association not found for ${inc.model.name} in ${this.name}`
-          );
+        if (!assoc)
           throw new Error(`Association not found for ${inc.model.name}`);
-        }
+
         const joinType = inc.required ? "INNER JOIN" : "LEFT OUTER JOIN";
         let joinOn: string;
+
         if (assoc.type === "belongsTo") {
           joinOn = `\`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
           sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
@@ -256,17 +254,14 @@ export abstract class Model {
           joinOn = `\`${mainAlias}\`.\`${this.primaryKey}\` = \`${as}\`.\`${assoc.foreignKey}\``;
           sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
         } else if (assoc.type === "belongsToMany") {
-          if (!assoc.through || !assoc.otherKey) {
-            this.orm.logger.error(
-              `[Model:findAndCountAll] Through model and otherKey required for belongsToMany in ${this.name}`
-            );
+          if (!assoc.through || !assoc.otherKey)
             throw new Error(
               "Through model and otherKey required for belongsToMany"
             );
-          }
           const throughAs = `${as}_through`;
           const throughTable = assoc.through.tableName;
-          sql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON \`${mainAlias}\`.\`${this.primaryKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          joinOn = `\`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          sql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON ${joinOn}`;
           joinOn = `\`${throughAs}\`.\`${assoc.otherKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
           sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
         }
@@ -278,41 +273,58 @@ export abstract class Model {
           Object.assign(params, incParams);
         }
 
-        // Add included model attributes
-        const incAttributes =
-          inc.attributes || Object.keys(inc.model.attributes);
+        // Include attributes + primary key
+        const incAttributes = inc.attributes
+          ? Array.from(new Set([inc.model.primaryKey, ...inc.attributes]))
+          : Object.keys(inc.model.attributes);
+
         for (const field of incAttributes) {
           selectClause.push(`\`${as}\`.\`${field}\` AS \`${as}_${field}\``);
         }
       }
     }
 
-    // Handle where conditions
-    let mainWhere = "";
+    // Main WHERE
     if (options.where) {
       const { clause, params: mParams } = buildWhereClause(options.where);
-      mainWhere = clause;
+      if (clause) whereClauses.push(clause);
       Object.assign(params, mParams);
     }
 
-    let whereClause = [mainWhere, ...whereClauses]
-      .filter((c) => c)
-      .join(" AND ");
-    if (whereClause) {
-      sql += ` WHERE ${whereClause}`;
-    }
+    const whereClause = whereClauses.length
+      ? ` WHERE ${whereClauses.join(" AND ")}`
+      : "";
+    sql += whereClause;
 
-    // Build count subquery
+    // Count subquery
     const countSelect = options.distinct
       ? `COUNT(DISTINCT \`${mainAlias}\`.\`${this.primaryKey}\`)`
       : `COUNT(*)`;
     let countSql = `SELECT ${countSelect} AS total_count FROM \`${dataset}.${this.tableName}\` AS \`${mainAlias}\``;
-    if (whereClause) {
-      countSql += ` WHERE ${whereClause}`;
+    if (options.include) {
+      for (const inc of options.include) {
+        const as = inc.as || inc.model.tableName;
+        const assoc = Object.values(this.associations).find(
+          (a) => a.as === as && a.target === inc.model
+        );
+        if (!assoc) continue;
+        const joinType = inc.required ? "INNER JOIN" : "LEFT OUTER JOIN";
+        if (assoc.type === "belongsTo") {
+          countSql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON \`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
+        } else if (assoc.type === "hasOne" || assoc.type === "hasMany") {
+          countSql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON \`${mainAlias}\`.\`${this.primaryKey}\` = \`${as}\`.\`${assoc.foreignKey}\``;
+        } else if (assoc.type === "belongsToMany") {
+          const throughAs = `${as}_through`;
+          const throughTable = assoc.through?.tableName;
+          countSql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON \`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          countSql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON \`${throughAs}\`.\`${assoc.otherKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
+        }
+      }
     }
+    if (whereClause) countSql += whereClause;
 
-    // Combine queries using a CTE
-    let finalSql = `
+    // Final query using CTE
+    const finalSql = `
     WITH count_query AS (${countSql}),
          data_query AS (
            SELECT ${options.distinct ? "DISTINCT" : ""} ${selectClause.join(
@@ -320,14 +332,9 @@ export abstract class Model {
     )}
            ${sql}
            ${
-             options.group
-               ? `GROUP BY ${options.group.map((g) => `\`${g}\``).join(", ")}`
-               : ""
-           }
-           ${
              options.order
                ? `ORDER BY ${options.order
-                   .map(([field, dir]) => `\`${field}\` ${dir}`)
+                   .map(([f, d]) => `\`${mainAlias}\`.\`${f}\` ${d}`)
                    .join(", ")}`
                : ""
            }
@@ -338,18 +345,20 @@ export abstract class Model {
     FROM data_query
   `;
 
-    // Execute query
+    this.orm.logger.info(`[Model:findAndCountAll] Final SQL for ${this.name}`, {
+      finalSql,
+      params,
+    });
+
     const [rows] = await this.orm.bigquery.query({ query: finalSql, params });
     const resultRows = options.raw
       ? rows
       : this.nestAssociations(rows, options.include || []);
-
     const count = rows[0]?.total_count || 0;
 
     this.orm.logger.info(
-      `[Model:findAndCountAll] Found ${resultRows.length} rows with total count ${count} for ${this.name} in dataset ${dataset}`
+      `[Model:findAndCountAll] Found ${resultRows.length} rows with total count ${count}`
     );
-
     return { rows: resultRows, count };
   }
 
@@ -875,7 +884,8 @@ export abstract class Model {
         );
         if (!assoc) {
           this.orm.logger.error(
-            `[Model:buildSelectQuery] Association not found for ${inc.model.name} in ${this.name}`
+            `[Model:buildSelectQuery] Association not found for ${inc.model.name} in ${this.name}`,
+            { associations: Object.keys(this.associations) }
           );
           throw new Error(`Association not found for ${inc.model.name}`);
         }
@@ -890,7 +900,8 @@ export abstract class Model {
         } else if (assoc.type === "belongsToMany") {
           if (!assoc.through || !assoc.otherKey) {
             this.orm.logger.error(
-              `[Model:buildSelectQuery] Through model and otherKey required for belongsToMany in ${this.name}`
+              `[Model:buildSelectQuery] Through model and otherKey required for belongsToMany in ${this.name}`,
+              { assoc }
             );
             throw new Error(
               "Through model and otherKey required for belongsToMany"
@@ -898,7 +909,9 @@ export abstract class Model {
           }
           const throughAs = `${as}_through`;
           const throughTable = assoc.through.tableName;
-          sql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON \`${mainAlias}\`.\`${this.primaryKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          // Use assoc.foreignKey for both sides of the first join
+          joinOn = `\`${mainAlias}\`.\`${assoc.foreignKey}\` = \`${throughAs}\`.\`${assoc.foreignKey}\``;
+          sql += ` ${joinType} \`${dataset}.${throughTable}\` AS \`${throughAs}\` ON ${joinOn}`;
           joinOn = `\`${throughAs}\`.\`${assoc.otherKey}\` = \`${as}\`.\`${inc.model.primaryKey}\``;
           sql += ` ${joinType} \`${dataset}.${inc.model.tableName}\` AS \`${as}\` ON ${joinOn}`;
         }
@@ -939,8 +952,9 @@ export abstract class Model {
       if (options.include) {
         for (const inc of options.include) {
           const as = inc.as || inc.model.tableName;
-          const incAttributes =
-            inc.attributes || Object.keys(inc.model.attributes);
+          const incAttributes = inc.attributes?.length
+            ? inc.attributes
+            : Object.keys(inc.model.attributes);
           for (const field of incAttributes) {
             selectClause.push(`\`${as}\`.\`${field}\` AS \`${as}_${field}\``);
           }
@@ -960,7 +974,7 @@ export abstract class Model {
 
     if (options.order) {
       sql += ` ORDER BY ${options.order
-        .map(([field, dir]) => `\`${field}\` ${dir}`)
+        .map(([field, dir]) => `\`${mainAlias}\`.\`${field}\` ${dir}`)
         .join(", ")}`;
     }
 
@@ -986,6 +1000,7 @@ export abstract class Model {
       `[Model:nestAssociations] Nesting associations for ${this.name}`,
       { includes }
     );
+
     if (!includes.length) {
       return rows.map((row) => {
         const result: any = {};
@@ -999,6 +1014,7 @@ export abstract class Model {
     }
 
     const parentMap = new Map<any, any>();
+
     for (const row of rows) {
       const parentPKValue = row[`${this.tableName}_${this.primaryKey}`];
       if (parentPKValue == null) continue;
@@ -1015,11 +1031,10 @@ export abstract class Model {
             (a) => a.as === as
           );
           if (assoc) {
-            if (assoc.type === "hasMany" || assoc.type === "belongsToMany") {
-              parent[as] = [];
-            } else {
-              parent[as] = null;
-            }
+            parent[as] =
+              assoc.type === "hasMany" || assoc.type === "belongsToMany"
+                ? []
+                : null;
           }
         }
         parentMap.set(parentPKValue, parent);
@@ -1034,7 +1049,20 @@ export abstract class Model {
         if (childPK == null) continue;
 
         const child: any = {};
-        for (const field in inc.model.attributes) {
+        // Use only requested attributes + PK internally
+        const selectedFields = inc.attributes
+          ? Array.from(new Set([inc.model.primaryKey, ...inc.attributes]))
+          : Object.keys(inc.model.attributes);
+
+        for (const field of selectedFields) {
+          if (
+            field === inc.model.primaryKey &&
+            inc.attributes &&
+            !inc.attributes.includes(field)
+          ) {
+            // skip PK if user didn’t request it
+            continue;
+          }
           child[field] = row[`${as}_${field}`];
         }
 
