@@ -24,7 +24,6 @@ export class BigQueryORM {
   public logger: Logger;
 
   constructor(config?: Partial<BigQueryORMConfig>) {
-    // Default logging to false if undefined
     const logging =
       config?.logging ?? process.env.BIGQUERY_ORM_LOGGING === "true";
     this.logger = createLogger(logging);
@@ -49,10 +48,35 @@ export class BigQueryORM {
       );
     }
 
-    this.bigquery = new BigQuery({
-      projectId: this.config.projectId,
-      keyFilename: this.config.keyFilename,
-    });
+    // 🔑 Authentication logic
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      // Manual inline JSON
+      this.bigquery = new BigQuery({
+        projectId: this.config.projectId,
+        credentials: JSON.parse(
+          process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
+        ),
+      });
+      this.logger.info(
+        "[BigQueryORM:constructor] Using credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON"
+      );
+    } else if (this.config.keyFilename) {
+      // Local file path
+      this.bigquery = new BigQuery({
+        projectId: this.config.projectId,
+        keyFilename: this.config.keyFilename,
+      });
+      this.logger.info(
+        "[BigQueryORM:constructor] Using credentials from keyFilename"
+      );
+    } else {
+      // ADC fallback
+      this.bigquery = new BigQuery({ projectId: this.config.projectId });
+      this.logger.info(
+        "[BigQueryORM:constructor] Using Application Default Credentials (ADC)"
+      );
+    }
+
     this.queryInterface = new QueryInterface(this);
     this.logger.info(
       "[BigQueryORM:constructor] BigQueryORM initialized successfully"

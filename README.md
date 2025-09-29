@@ -57,15 +57,15 @@ Install via npm:
 npm install orm-bq
 ```
 
-Ensure you have Google Cloud credentials set up (e.g., via `GOOGLE_APPLICATION_CREDENTIALS` env var).
-
 ## Configuration
 
-Create an instance of `BigQueryORM` with your project config. No dataset is required in config—pass it dynamically.
+Create an instance of `BigQueryORM` with your project config.  
+No dataset is required in config — pass it dynamically when calling methods.
 
 ```typescript
 import { BigQueryORM } from "orm-bq";
 
+// Example with local key file
 const orm = new BigQueryORM({
   projectId: "your-project-id",
   keyFilename: "/path/to/keyfile.json", // Optional if using env
@@ -75,6 +75,42 @@ const orm = new BigQueryORM({
 
 await orm.authenticate(); // Verify connection
 ```
+
+### 🔑 Authentication Options
+
+`BigQueryORM` supports three authentication modes:
+
+1. **Application Default Credentials (ADC)**
+
+   - Works automatically on GCP (Cloud Run, GCE, GKE, App Engine).
+   - Also works locally if you run:
+
+     ```bash
+     gcloud auth application-default login
+     ```
+
+   - No extra config required.
+
+2. **Environment variable with inline JSON (recommended for non-GCP hosts like Render, Heroku, AWS):**
+
+   - Store your service account JSON in an env var:
+
+     ```
+     GOOGLE_APPLICATION_CREDENTIALS_JSON = { ...full JSON key... }
+     ```
+
+   - `BigQueryORM` will automatically detect and use it.
+
+3. **Key file path:**
+
+   - Provide the service account file path via `keyFilename` config:
+
+     ```typescript
+     const orm = new BigQueryORM({
+       projectId: "your-project-id",
+       keyFilename: "/path/to/keyfile.json",
+     });
+     ```
 
 ## Defining Models
 
